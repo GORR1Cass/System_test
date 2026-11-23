@@ -167,6 +167,20 @@ def autodetect_ports() -> tuple[str, str]:
     )
 
 
+def probe_cli(port, tries: int = 3) -> bool:
+    """True se a porta responde como a CLI do demo (prompt 'mmwDemo:/>')."""
+    for _ in range(tries):
+        port.reset_input_buffer()
+        port.write(b"\n")
+        reply = b""
+        deadline = time.time() + 0.8
+        while time.time() < deadline:
+            reply += port.read(port.in_waiting or 1)
+            if b"mmwDemo" in reply:
+                return True
+    return False
+
+
 def send_config(cli, cfg_path: Path, verbose: bool = True) -> None:
     """Envia o .cfg linha a linha e espera 'Done' (ou 'Error') de cada comando."""
     lines = [
@@ -187,9 +201,11 @@ def send_config(cli, cfg_path: Path, verbose: bool = True) -> None:
         if verbose:
             print(f"  {'OK ' if ok else 'ERR'} {line}")
         if not ok and line != "sensorStop":
-            print(f"      resposta: {text!r}")
-            if "Error" in text or "not recognized" in text:
-                raise SystemExit(f"O radar rejeitou o comando: {line}")
+            print(f"      resposta: {text[:200]!r}")
+            raise SystemExit(
+                f"O radar nao confirmou o comando: {line}\n"
+                "Se a resposta parece lixo binario, as portas CLI/DADOS estao trocadas."
+            )
 
 
 class SimulatedPort:
@@ -483,6 +499,20 @@ def main() -> None:
                 "Feche o mmWave Demo Visualizer / Radar Studio / terminal que esteja usando o COM."
             )
         if cli:
+            if not probe_cli(cli):
+                # talvez as portas estejam trocadas: testa a outra como CLI
+                data.baudrate = args.cli_baud
+                if probe_cli(data):
+                    print(f"Aviso: {args.data_port} e a CLI e {args.cli_port} e a porta de dados; "
+                          "trocando automaticamente.")
+                    cli, data = data, cli
+                    data.baudrate = args.data_baud
+                else:
+                    raise SystemExit(
+                        "Nenhuma das duas portas respondeu como CLI (prompt 'mmwDemo:/>').\n"
+                        "Verifique: S1 em modo funcional (SOP0=ON, SOP1/2=OFF), demo gravado na flash, "
+                        "alimentacao 5 V, aperte NRST (SW2) e tente de novo."
+                    )
             print(f"Enviando configuracao {args.config} ...")
             send_config(cli, args.config)
         data.reset_input_buffer()
