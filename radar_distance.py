@@ -181,13 +181,6 @@ def probe_cli(port, tries: int = 3) -> bool:
     return False
 
 
-# comandos de calibracao/monitoramento: se falharem, apenas avisa e continua
-OPTIONAL_CMDS = {
-    "compRangeBiasAndRxChanPhase", "measureRangeBiasAndRxChanPhase", "CQRxSatMonitor",
-    "CQSigImgMonitor", "analogMonitor", "calibData", "lvdsStreamCfg", "lowPower",
-}
-
-
 def send_config(cli, cfg_path: Path, verbose: bool = True) -> None:
     """Envia o .cfg linha a linha e espera 'Done' (ou 'Error') de cada comando."""
     lines = [
@@ -221,9 +214,6 @@ def send_config(cli, cfg_path: Path, verbose: bool = True) -> None:
             print(f"  {'OK ' if ok else 'ERR'} {line}" + (f"  (tentativa {attempt + 1})" if attempt else ""))
         if not ok and line != "sensorStop":
             print(f"      resposta: {text[:200]!r}")
-            if line.split()[0] in OPTIONAL_CMDS:
-                print("      (comando opcional, seguindo em frente)")
-                continue
             garbage = sum(not (32 <= ord(c) < 127 or c in "\n\t") for c in text) > len(text) // 4
             raise SystemExit(
                 f"O radar nao confirmou o comando: {line}"
