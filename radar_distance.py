@@ -189,17 +189,29 @@ def send_config(cli, cfg_path: Path, verbose: bool = True) -> None:
     ]
     cli.reset_input_buffer()
     for line in lines:
-        cli.write((line + "\n").encode())
-        reply = b""
-        deadline = time.time() + 3.0
-        while time.time() < deadline:
-            reply += cli.read(cli.in_waiting or 1)
-            if b"Done" in reply or b"Error" in reply or b"not recognized" in reply:
+        text = ""
+        ok = False
+        for attempt in range(4):
+            # a UART do demo e lenta: espera o prompt anterior terminar antes de escrever
+            time.sleep(0.05)
+            cli.reset_input_buffer()
+            cli.write((line + "\n").encode())
+            reply = b""
+            deadline = time.time() + 3.0
+            while time.time() < deadline:
+                reply += cli.read(cli.in_waiting or 1)
+                # resposta completa = "Done"/"Error" + prompt final
+                if reply.rstrip().endswith(b"mmwDemo:/>") and (
+                    b"Done" in reply or b"Error" in reply or b"not recognized" in reply
+                ):
+                    break
+            text = reply.decode(errors="replace").strip().replace("\r", "")
+            ok = "Done" in text and "Error" not in text and "not recognized" not in text
+            # comando chegou truncado (caracteres perdidos): tenta de novo
+            if ok or "not recognized" not in text:
                 break
-        text = reply.decode(errors="replace").strip().replace("\r", "")
-        ok = "Done" in text and "Error" not in text
         if verbose:
-            print(f"  {'OK ' if ok else 'ERR'} {line}")
+            print(f"  {'OK ' if ok else 'ERR'} {line}" + (f"  (tentativa {attempt + 1})" if attempt else ""))
         if not ok and line != "sensorStop":
             print(f"      resposta: {text[:200]!r}")
             raise SystemExit(
