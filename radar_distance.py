@@ -181,6 +181,31 @@ def probe_cli(port, tries: int = 3) -> bool:
     return False
 
 
+def _send_line(cli, line: str) -> tuple[bool, str, int]:
+    """Envia um comando e devolve (ok, resposta, tentativas). Repete se chegar truncado."""
+    text, ok, attempt = "", False, 0
+    for attempt in range(4):
+        # a UART do demo e lenta: espera o prompt anterior terminar antes de escrever
+        time.sleep(0.05)
+        cli.reset_input_buffer()
+        cli.write((line + "\n").encode())
+        reply = b""
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            reply += cli.read(cli.in_waiting or 1)
+            # resposta completa = "Done"/"Error" + prompt final
+            if reply.rstrip().endswith(b"mmwDemo:/>") and (
+                b"Done" in reply or b"Error" in reply or b"not recognized" in reply
+            ):
+                break
+        text = reply.decode(errors="replace").strip().replace("\r", "")
+        ok = "Done" in text and "Error" not in text and "not recognized" not in text
+        # comando chegou truncado (caracteres perdidos): tenta de novo
+        if ok or "not recognized" not in text:
+            break
+    return ok, text, attempt + 1
+
+
 def send_config(cli, cfg_path: Path, verbose: bool = True) -> None:
     """Envia o .cfg linha a linha e espera 'Done' (ou 'Error') de cada comando."""
     lines = [
@@ -189,36 +214,28 @@ def send_config(cli, cfg_path: Path, verbose: bool = True) -> None:
     ]
     cli.reset_input_buffer()
     for line in lines:
-        text = ""
-        ok = False
-        for attempt in range(4):
-            # a UART do demo e lenta: espera o prompt anterior terminar antes de escrever
-            time.sleep(0.05)
-            cli.reset_input_buffer()
-            cli.write((line + "\n").encode())
-            reply = b""
-            deadline = time.time() + 3.0
-            while time.time() < deadline:
-                reply += cli.read(cli.in_waiting or 1)
-                # resposta completa = "Done"/"Error" + prompt final
-                if reply.rstrip().endswith(b"mmwDemo:/>") and (
-                    b"Done" in reply or b"Error" in reply or b"not recognized" in reply
-                ):
-                    break
-            text = reply.decode(errors="replace").strip().replace("\r", "")
-            ok = "Done" in text and "Error" not in text and "not recognized" not in text
-            # comando chegou truncado (caracteres perdidos): tenta de novo
-            if ok or "not recognized" not in text:
-                break
+        ok, text, tries = _send_line(cli, line)
+        if not ok and line == "sensorStart" and "partial configuration" in text:
+            # algumas versoes do demo exigem o argumento doReconfig=1
+            print("  ERR sensorStart  -> tentando 'sensorStart 1'")
+            line = "sensorStart 1"
+            ok, text, tries = _send_line(cli, line)
         if verbose:
-            print(f"  {'OK ' if ok else 'ERR'} {line}" + (f"  (tentativa {attempt + 1})" if attempt else ""))
+            print(f"  {'OK ' if ok else 'ERR'} {line}" + (f"  (tentativa {tries})" if tries > 1 else ""))
         if not ok and line != "sensorStop":
-            print(f"      resposta: {text[:200]!r}")
+            print(f"      resposta: {text[:300]!r}")
+            try:
+                _send_line(cli, "sensorStop")
+            except Exception:
+                pass
             garbage = sum(not (32 <= ord(c) < 127 or c in "\n\t") for c in text) > len(text) // 4
-            raise SystemExit(
-                f"O radar nao confirmou o comando: {line}"
-                + ("\nA resposta parece lixo binario: as portas CLI/DADOS estao trocadas." if garbage else "")
-            )
+            hint = ""
+            if garbage:
+                hint = "\nA resposta parece lixo binario: as portas CLI/DADOS estao trocadas."
+            elif "partial configuration" in text:
+                hint = ("\nO firmware guardou uma configuracao parcial de tentativas anteriores: "
+                        "aperte NRST (SW2) na placa e rode de novo.")
+            raise SystemExit(f"O radar nao confirmou o comando: {line}{hint}")
 
 
 class SimulatedPort:
