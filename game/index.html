@@ -112,11 +112,12 @@ const CFG = {
   jumpVel: 10, coyote: 0.1, jumpBuffer: 0.14,
   stepUp: 0.6,
   wallRunTime: 1.3, wallRunMinSpeed: 3.5, wallRunGravity: 7,
-  wallClimbTime: 0.45, wallClimbSpeed: 7.5,
+  wallClimbTime: 0.4, wallClimbSpeed: 7.5,
   wallJumpOut: 8.5, wallJumpUp: 9.8,
   playerHP: 100, enemyHP: 75,
   playerBulletSpeed: 95, playerDamage: 25, playerFireCooldown: 0.13,
-  enemyBulletSpeed: 30, enemyDamage: 6, enemyRange: 75,
+  enemyBulletSpeed: 42, enemyDamage: 12, enemyRange: 95,
+  enemyBurst: 3, enemyBurstGap: 0.13, enemyBurstDelay: 1.3,   // 3-round bursts, ~1.3-1.8 s apart
   bulletTimeScale: 0.25, focusMax: 100, focusDrain: 24, focusRegen: 12, focusRegenDelay: 1.0,
   mouseSens: 0.0022,
 };
@@ -135,14 +136,8 @@ function addBox(x0, y0, z0, x1, y1, z1, kind, tint = 0) {
   return b;
 }
 function block(cx, cz, w, d, h, y0, kind, tint) { return addBox(cx - w / 2, y0, cz - d / 2, cx + w / 2, y0 + h, cz + d / 2, kind, tint); }
-// Solid staircase climbing along `axis` in direction `sign`, starting at coordinate `start`.
-function stairs(axis, sign, start, steps, run, rise, l0, l1, base) {
-  for (let i = 0; i < steps; i++) {
-    const a0 = start + sign * i * run, a1 = start + sign * (i + 1) * run, top = base + rise * (i + 1);
-    if (axis === 'x') addBox(a0, base, l0, a1, top, l1, 'stair');
-    else addBox(l0, base, a0, l1, top, a1, 'stair');
-  }
-}
+// A slab sticking out of a wall, `top` metres up, `t` thick.
+function ledge(x0, z0, x1, z1, top, t = 0.6) { return addBox(x0, top - t, z0, x1, top, z1, 'ledge'); }
 
 function buildLevel() {
   addBox(-60, -1, -60, 60, 0, 60, 'ground');
@@ -156,17 +151,28 @@ function buildLevel() {
   block(20, -5, 10, 18, 12, 0, 'building', 3);    // E1  roof 12
   block(22, 18, 10, 10, 5, 0, 'building', 4);     // E2  roof 5
 
-  // West route: ground -> W1 (8) -> W2 (16) -> N1 (24)
-  stairs('z', -1, 23, 16, 1, 0.5, -25, -21, 0);
-  stairs('z', -1, 7, 16, 0.875, 0.5, -25, -22, 8);
-  addBox(-25, 15, -14, -22, 16, -7, 'bridge');
-  stairs('x', 1, -27, 16, 0.6, 0.5, -25.5, -23, 16);
-  addBox(-17.4, 23, -25.5, -8, 24, -23, 'bridge');
+  // No stairs: every roof is reached by platforming. Orange pieces mark the routes.
+  // A standing jump clears ~1.7 m; a jump into a wall followed by a climb gains ~4 m.
 
-  // East route: ground -> E2 (5) -> E1 (12)
-  stairs('x', 1, 7, 10, 1, 0.5, 19, 22, 0);
-  stairs('z', -1, 23, 14, 0.7, 0.5, 21, 23.5, 5);
-  addBox(21, 11, 4, 23.5, 12, 13.2, 'bridge');
+  // West route: ground -> pillars -> balcony -> climb W1 (8) -> tank -> pillar -> balcony -> climb W2 (16)
+  //             -> rooftop tank -> two pillars -> climb N1 (24)
+  block(-10.5, 19.5, 2.5, 2.5, 1.2, 0, 'route');
+  block(-13.5, 16.5, 2.5, 2.5, 2.4, 0, 'route');
+  block(-16.5, 13, 2.5, 2.5, 3.6, 0, 'route');
+  ledge(-20, 7, -15, 10, 4.5);                       // balcony on W1's south face
+  block(-22, -5.5, 3, 3, 3, 8, 'route');             // water tank on W1 roof (climb it)
+  block(-22, -10.5, 2, 2, 11.5, 0, 'route');         // pillar in the gap
+  ledge(-24, -14, -20, -12, 12.5);                   // balcony on W2's south face
+  block(-17, -24, 3, 3, 3, 16, 'route');             // tank on W2 roof (climb it)
+  block(-12.5, -24, 2, 2, 20, 0, 'route');
+  block(-9.75, -24, 1.5, 1.5, 21, 0, 'route');       // last pillar, then climb N1's west face
+
+  // East route: ground -> crates -> climb E2 (5) -> AC unit -> two pillars -> climb E1 (12)
+  block(12, 21, 2.5, 2.5, 1.3, 0, 'route');
+  block(15.25, 19, 2, 2, 2.4, 0, 'route');
+  block(22, 14.5, 3, 2, 1.3, 5, 'route');            // AC unit on E2 roof
+  block(22, 10, 2, 2, 7.5, 0, 'route');
+  block(22, 6.5, 2, 2, 8.7, 0, 'route');
 
   // Parkour: a 3 m chimney between N1's south face and a free-standing wall (wall-jump up it),
   // and a long wall on the west side for wall running.
@@ -262,7 +268,7 @@ const windowTex = makeWindowTexture();
 const blobTex = makeBlobTexture();
 
 const BUILDING_TINTS = ['#ddd6ca', '#c8d0d8', '#d9cfc2', '#c2cbd3', '#d3d9d2'];
-const KIND_COLORS = { ground: '#7c857e', boundary: '#9097a0', stair: '#8b929a', bridge: '#8a6e55', wall: '#a8a197', crate: '#b08f5f', cover: '#7f878f' };
+const KIND_COLORS = { ground: '#7c857e', boundary: '#9097a0', route: '#d98a3d', ledge: '#c97c34', wall: '#a8a197', crate: '#8e8b84', cover: '#7f878f' };
 const edgeMat = new THREE.LineBasicMaterial({ color: 0x252b31, transparent: true, opacity: 0.35 });
 const matCache = {};
 function materialFor(b) {
@@ -490,7 +496,7 @@ function createEnemy(spec, i) {
   const e = {
     pos: new V3(spec.x, spec.y + 0.5, spec.z), vel: new V3(), half: { x: 0.5, y: 0.5, z: 0.5 }, grounded: true,
     hp: CFG.enemyHP, alive: true, bounds: [b[0] + m, b[1] - m, b[2] + m, b[3] - m],
-    fireTimer: 1.6 + i * 0.35, strafeDir: i % 2 ? 1 : -1, strafeTimer: 1 + (i % 3) * 0.6,
+    fireTimer: 2.0 + i * 0.2, burst: 0, strafeDir: i % 2 ? 1 : -1, strafeTimer: 1 + (i % 3) * 0.6,  // 2 s grace period after (re)start
     losTimer: 0, los: false, flash: 0, running: false,
     bar, fill, ...parts,
   };
@@ -854,9 +860,9 @@ function updateEnemy(e, dt) {
   if (e.strafeTimer <= 0) { e.strafeDir = Math.random() < 0.5 ? -1 : 1; e.strafeTimer = 1.4 + Math.random() * 2.2; }
 
   if (P.alive) {
-    if (dist < 13) { mx = -nx; mz = -nz; speed = 8; e.running = true; }                         // run away
-    else if (dist < 22) { mx = -nx * 0.6 + px * e.strafeDir * 0.8; mz = -nz * 0.6 + pz * e.strafeDir * 0.8; speed = 4; e.running = false; } // back off
-    else { mx = px * e.strafeDir; mz = pz * e.strafeDir; speed = 2.5; e.running = false; }       // patrol / strafe
+    if (dist < 13) { mx = -nx; mz = -nz; speed = 9; e.running = true; }                         // run away
+    else if (dist < 22) { mx = -nx * 0.5 + px * e.strafeDir; mz = -nz * 0.5 + pz * e.strafeDir; speed = 6; e.running = true; } // back off while strafing
+    else { mx = nx * 0.6 + px * e.strafeDir * 0.8; mz = nz * 0.6 + pz * e.strafeDir * 0.8; speed = 4.5; e.running = false; } // push to the roof edge to get a shot
     const ml = Math.hypot(mx, mz) || 1; mx /= ml; mz /= ml;
     // Stay on the roof: drop any component that would leave the bounds, then slide sideways if cornered.
     const b = e.bounds, look = 1.0;
@@ -901,12 +907,15 @@ function updateEnemy(e, dt) {
     to.normalize();
     e.los = d3 < CFG.enemyRange && rayWorld(eye, to, d3) >= d3 - 0.6;
   }
-  if (!e.los) { e.fireTimer = Math.max(e.fireTimer, 0.5); return; }
+  if (!e.los) { e.fireTimer = Math.max(e.fireTimer, 0.35); e.burst = 0; return; }
   e.fireTimer -= dt;
   if (e.fireTimer <= 0) {
-    e.fireTimer = 1.3 + Math.random() * 1.2;
-    const lead = d3 / CFG.enemyBulletSpeed * 0.55;
-    const aim = P.pos.clone().addScaledVector(P.vel, lead).add(randUnit().multiplyScalar(0.35 + d3 * 0.018));
+    if (e.burst <= 0) e.burst = CFG.enemyBurst;
+    e.burst--;
+    // Within a burst shots come fast; between bursts a short pause (shorter still when cornered).
+    e.fireTimer = e.burst > 0 ? CFG.enemyBurstGap : (dist < 13 ? 0.45 : CFG.enemyBurstDelay) + Math.random() * 0.5;
+    const lead = d3 / CFG.enemyBulletSpeed * 0.7;
+    const aim = P.pos.clone().addScaledVector(P.vel, lead).add(randUnit().multiplyScalar(0.3 + d3 * 0.012));
     const dir = aim.sub(eye).normalize();
     spawnBullet('enemy', eye.clone().addScaledVector(dir, 0.8), dir);
   }
@@ -975,7 +984,7 @@ function setState(s) {
     o.classList.add('clickable');
     o.innerHTML = `<div class="card">
       <h1><span class="b">Cube</span> Rooftops</h1>
-      <p>Nine red cubes hold the rooftops above you. They keep their distance and shoot back. Climb the stairs and bridges, or wall-jump up the narrow gap in front of the tall tower, and clear every roof.</p>
+      <p>Nine red cubes hold the rooftops above you. They keep their distance and shoot back in bursts. There are no stairs: follow the orange pillars and ledges, climb walls, or wall-jump up the narrow gap in front of the tall tower.</p>
       ${CONTROLS}
       <div class="cta">Click to start</div>
       <div class="note">Esc frees the mouse and pauses.</div>
