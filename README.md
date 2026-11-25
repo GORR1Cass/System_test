@@ -21,8 +21,12 @@ Third-person rooftop shooter prototype in plain HTML + JavaScript (Three.js from
 
 - **Mouse** aim · **Left click** shoot · **WASD** move · **Shift** run · **Space** jump / wall jump
 - **Right click** or **E** bullet time (slows player, enemies and bullets; drains the meter)
-- Jump along a wall to **wall run**, jump into a wall to **wall climb**, jump again to **wall jump** off it
+- Run and jump along a wall to **wall run**, jump into a wall to **wall climb**, jump again to **wall jump** off it
 - **R** restarts after you die or clear the level
-- No stairs: reach the roofs by platforming along the **orange** pillars, balconies and rooftop tanks, climbing walls between them – west side 8 m → 16 m → 24 m tower, east side 5 m → 12 m – or wall-jump up the gap in front of the tower
-- Enemies fire 3-round bursts; standing still in the open gets you killed in a few seconds
-- Tuning values (speeds, damage, bullet time) are in the `CFG` object at the top of the script
+- The level is one street with buildings on both sides (and behind the start). No stairs: wall-jump up the 3–3.5 m **alleys**
+  between buildings, use the **orange billboards** on lower roofs to continue up to taller neighbours, and **wall-run** along the
+  orange walls to cross the 12 m courtyards (the far east tower can only be reached that way)
+- Guns have a limited range (player ~60 m, enemies engage within 50 m); the crosshair turns red on an enemy in range and shows
+  "Out of range" beyond it
+- Enemies fire 3-round bursts; standing still in the open gets you killed quickly
+- Tuning values (speeds, damage, ranges, bullet time) are in the `CFG` object at the top of the script
