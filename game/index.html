@@ -48,6 +48,7 @@ canvas { display: block; position: fixed; inset: 0; width: 100%; height: 100%; }
 
 #targets { top: calc(env(safe-area-inset-top, 0px) + 16px); right: max(16px, env(safe-area-inset-right, 0px)); display: flex; gap: 10px; align-items: baseline; }
 #enemyCount { font-size: 22px; color: var(--enemy); }
+#hint { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); display: flex; gap: 8px; align-items: center; text-shadow: 0 1px 3px rgba(0,0,0,.9); pointer-events: none; }
 
 #crosshair { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); pointer-events: none; --ch: var(--ink); }
 #crosshair::before, #crosshair::after { content: ""; position: absolute; background: var(--ch); box-shadow: 0 0 2px rgba(0,0,0,.8); }
@@ -95,6 +96,7 @@ body.slowmo #slow { opacity: 1; }
   <div class="bar thin"><div id="focusFill" class="fill focus"></div></div>
 </div>
 <div id="targets" class="panel"><span class="label">Enemies left</span><span id="enemyCount" class="num">0</span></div>
+<div id="hint" class="label"><span class="key">R</span> Restart</div>
 <div id="crosshair"></div>
 <div id="rangeTag" hidden>Out of range</div>
 <div id="moveTag"></div>
@@ -112,8 +114,8 @@ const $ = (id) => document.getElementById(id);
 // ------------------------------------------------------------------ tuning
 const CFG = {
   gravity: 28, maxFall: 32,
-  walkSpeed: 6, runSpeed: 11,
-  groundAccel: 70, airAccel: 16,
+  walkSpeed: 7.5, runSpeed: 13,
+  groundAccel: 85, airAccel: 20,
   jumpVel: 10, coyote: 0.1, jumpBuffer: 0.14,
   stepUp: 0.6,
   wallRunTime: 1.25, wallRunMinSpeed: 3.5, wallRunGravity: 9, wallRunLiftMin: 2.5, wallRunLiftMax: 6,
@@ -151,7 +153,9 @@ function billboard(side, z0, z1, base, h) { return side < 0 ? addBox(-BX, base, 
 function runWall(side, z0, z1, h) { return side < 0 ? addBox(-BX, 0, z0, -24.5, h, z1, 'route') : addBox(24.5, 0, z0, BX, h, z1, 'route'); }
 function block(cx, cz, w, d, h, y0, kind, tint, list) { return addBox(cx - w / 2, y0, cz - d / 2, cx + w / 2, y0 + h, cz + d / 2, kind, tint, list); }
 
-const ROOFS = {};
+const ROOFS = {}, BALC = {};
+// Slab sticking 2 m out of a street facade, over the sidewalk.
+function balcony(side, z0, z1, top) { return side < 0 ? addBox(-FX, top - 0.6, z0, -6, top, z1, 'ledge') : addBox(6, top - 0.6, z0, FX, top, z1, 'ledge'); }
 function buildLevel() {
   addBox(-28, -1, -76, 28, 0, 76, 'ground');
   addBox(-28, 0, -76, -27, 40, 76, 'boundary'); addBox(27, 0, -76, 28, 40, 76, 'boundary');
@@ -177,6 +181,12 @@ function buildLevel() {
   ROOFS.EF = bldg(1, -46, -30, 17, 1);                       // courtyard -58..-46, run wall (only way onto EG)
   runWall(1, -58, -46, 20);
   ROOFS.EG = bldg(1, -74, -58, 17, 3);
+
+  // Balconies over the sidewalk (enemy posts; also something to land on)
+  BALC.W1 = balcony(-1, 14, 20, 9);     // on WD
+  BALC.W2 = balcony(-1, -38, -32, 12);  // on WF
+  BALC.E1 = balcony(1, 32, 38, 7);      // on EC
+  BALC.E2 = balcony(1, -20, -14, 10);   // on EE
 
   // Rooftop cover (AC units)
   [[20, 68, 12], [-20, 64, 8], [-12, 50, 10], [12, 49, 7], [20, 30, 13], [-20, 10, 16], [20, 8, 12],
@@ -208,10 +218,25 @@ function buildLevel() {
   for (const [x, z, w, d, h, t] of sky) block(x, z, w, d, h, 0, 'building', t, deco);
 }
 
-const ENEMY_ROOFS = [
-  ['EA', 15, 67], ['WA', -15, 67], ['WB', -16, 49], ['EB', 17, 51], ['EC', 14, 33], ['WD', -15, 13], ['ED', 15, 5],
-  ['WE', -15, -15], ['EE', 16, -16], ['WF', -14, -35], ['WF', -21, -43], ['EF', 15, -38], ['WG', -15, -62], ['EG', 16, -66],
-];
+// Enemy posts: each enemy stands at (x, z) on top of `on` and stays inside `area` [x0, x1, z0, z1].
+// Placement is fixed, so every restart starts from the same layout.
+function boxArea(b) { return [b.min.x, b.max.x, b.min.z, b.max.z]; }
+function enemySpawns() {
+  const roof = (k, x, z) => ({ x, z, y: ROOFS[k].max.y, area: boxArea(ROOFS[k]) });
+  const balc = (k) => { const b = BALC[k]; return { x: (b.min.x + b.max.x) / 2, z: (b.min.z + b.max.z) / 2, y: b.max.y, area: boxArea(b) }; };
+  const ground = (x, z, area) => ({ x, z, y: 0, area });
+  return [
+    // rooftops
+    roof('WA', -15, 67), roof('EA', 15, 67), roof('EB', 17, 51), roof('WD', -15, 13), roof('WE', -15, -15),
+    roof('EE', 16, -16), roof('WF', -14, -40), roof('EF', 15, -38), roof('EG', 16, -66),
+    // balconies over the sidewalk
+    balc('W1'), balc('W2'), balc('E1'), balc('E2'),
+    // street level, in the road
+    ground(2, 30, [-5.5, 5.5, 22, 38]), ground(3, -30, [-5.5, 5.5, -38, -22]), ground(-2, -58, [-5.5, 5.5, -66, -50]),
+    // courtyards
+    ground(-16, 0, [-24.5, -8, -6, 6]), ground(16, -52, [8, 24.5, -58, -46]),
+  ];
+}
 const PLAYER_SPAWN = { x: 0, y: 0.5, z: 52 };
 
 // ------------------------------------------------------------------ spatial grid for collision queries
@@ -295,7 +320,7 @@ const blobTex = makeBlobTexture();
 
 const BUILDING_TINTS = ['#ddd6ca', '#c8d0d8', '#d9cfc2', '#c2cbd3', '#d3d9d2'];
 const CAR_COLORS = ['#3a6ea5', '#c9c3b8', '#8c2f2f', '#2f4f3a', '#b7a24a'];
-const KIND_COLORS = { ground: '#7c857e', boundary: '#8a9097', route: '#e8913f', cover: '#7f878f', pole: '#3b4148', asphalt: '#4a4f55', sidewalk: '#9da39f', paint: '#e9e6da' };
+const KIND_COLORS = { ground: '#7c857e', boundary: '#8a9097', route: '#e8913f', ledge: '#6f7780', cover: '#7f878f', pole: '#3b4148', asphalt: '#4a4f55', sidewalk: '#9da39f', paint: '#e9e6da' };
 
 // --- static geometry is merged into one mesh per material (a handful of draw calls for the whole city)
 const batches = new Map();
@@ -561,17 +586,17 @@ const player = {
 let enemies = [];
 const bullets = [], blood = [], sparks = [], chunks = [];
 
-function createEnemy([roof, x, z], i) {
-  const R = ROOFS[roof], parts = makeCube(0xe23b3b);
+function createEnemy(spec, i) {
+  const parts = makeCube(0xe23b3b);
   const bar = new THREE.Group();
   const bg = new THREE.Mesh(barBgGeo, barBgMat);
   const fill = new THREE.Mesh(barFillGeo, barFillMat); fill.position.set(-0.57, 0, 0.002);
   bg.renderOrder = 10; fill.renderOrder = 11;
   bar.add(bg, fill); scene.add(bar);
-  const m = 0.65;
+  const m = 0.65, a = spec.area;
   const e = {
-    pos: new V3(x, R.max.y + 0.5, z), vel: new V3(), half: { x: 0.5, y: 0.5, z: 0.5 }, grounded: true,
-    hp: CFG.enemyHP, alive: true, bounds: [R.min.x + m, R.max.x - m, R.min.z + m, R.max.z - m],
+    pos: new V3(spec.x, spec.y + 0.5, spec.z), vel: new V3(), half: { x: 0.5, y: 0.5, z: 0.5 }, grounded: true,
+    hp: CFG.enemyHP, alive: true, bounds: [a[0] + m, a[1] - m, a[2] + m, a[3] - m],
     fireTimer: 2.0 + (i % 5) * 0.2, burst: 0, strafeDir: i % 2 ? 1 : -1, strafeTimer: 1 + (i % 3) * 0.6,   // 2 s grace period after (re)start
     losTimer: (i % 4) * 0.05, los: false, flash: 0, running: false,
     bar, fill, ...parts,
@@ -591,7 +616,7 @@ function clearDynamic() {
 
 function restart() {
   clearDynamic();
-  enemies = ENEMY_ROOFS.map(createEnemy);
+  enemies = enemySpawns().map(createEnemy);
   Object.assign(player, { hp: CFG.playerHP, alive: true, grounded: false, coyote: 0, jumpBuf: 0, wallState: 'none', wallTimer: 0, wallNormal: null, lastWallNormal: null, wallJumpLock: 0, fireCd: 0, flash: 0 });
   player.pos.set(PLAYER_SPAWN.x, PLAYER_SPAWN.y, PLAYER_SPAWN.z);
   player.vel.set(0, 0, 0);
@@ -1074,6 +1099,7 @@ const CONTROLS = `
     <div><span>Bullet time</span><span><span class="key">Right click</span> or <span class="key">E</span></span></div>
     <div><span>Wall run</span><span>Run and jump along a wall</span></div>
     <div><span>Wall climb</span><span>Jump into a wall</span></div>
+    <div><span>Restart (any time)</span><span class="key">R</span></div>
   </div>`;
 function setState(s) {
   state = s;
@@ -1084,7 +1110,7 @@ function setState(s) {
     o.classList.add('clickable');
     o.innerHTML = `<div class="card">
       <h1><span class="b">Cube</span> Rooftops</h1>
-      <p>Fourteen red cubes hold the rooftops on both sides of the street, including behind you. Guns reach about 60 m. Wall-jump up the narrow alleys between buildings, use the <b>orange billboards</b> to go higher, and wall-run along the <b>orange walls</b> to cross the courtyards.</p>
+      <p>Eighteen red cubes are spread along the street: on rooftops, on balconies, in the road and in the courtyards, including behind you. Guns reach about 60 m. Wall-jump up the narrow alleys between buildings, use the <b>orange billboards</b> to go higher, and wall-run along the <b>orange walls</b> to cross the courtyards.</p>
       ${CONTROLS}
       <div class="cta">Click to start</div>
       <div class="note">Esc frees the mouse and pauses.</div>
@@ -1123,7 +1149,7 @@ addEventListener('keydown', (e) => {
   if (e.repeat) return;
   if (e.code === 'Space') jumpQueued = true;
   if (e.code === 'KeyE' && state === 'playing') setBulletTime(!bulletTime);
-  if (e.code === 'KeyR' && (state === 'dead' || state === 'won')) { restart(); lockPointer(); }
+  if (e.code === 'KeyR' && state !== 'start') { restart(); lockPointer(); }   // restart at any moment
 });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; firing = false; });
@@ -1218,7 +1244,7 @@ function frame(now) {
 }
 
 // Initial scene behind the start screen
-enemies = ENEMY_ROOFS.map(createEnemy);
+enemies = enemySpawns().map(createEnemy);
 player.pos.set(PLAYER_SPAWN.x, PLAYER_SPAWN.y, PLAYER_SPAWN.z);
 player.mesh.position.copy(player.pos);
 setState('start');
@@ -1244,7 +1270,7 @@ requestAnimationFrame(frame);
 // Handle for automated tests / tinkering from the console.
 window.__game = {
   player, boxes, ROOFS, CFG, keys, simulate, restart, updateCamera, updateAim, renderer, scene, camera,
-  get enemies() { return enemies; }, get state() { return state; },
+  get enemies() { return enemies; }, BALC, get state() { return state; },
   get bullets() { return bullets; }, aim,
   setView(y, p) { yaw = y; pitch = p; },
   jump() { jumpQueued = true; },
