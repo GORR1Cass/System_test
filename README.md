@@ -17,16 +17,28 @@ python radar_distance.py --simulate        # testa sem hardware
 
 ## Game prototype – Cube Rooftops (`game/`)
 
-Third-person rooftop shooter prototype in plain HTML + JavaScript (Three.js from a CDN). Open `game/index.html` in a browser – no build step.
+Third-person parkour shooter prototype in plain HTML + JavaScript (Three.js from a CDN). Open `game/index.html` in a browser – no build step. The level is built only from boxes.
 
 - **Mouse** aim · **Left click** shoot · **WASD** move · **Shift** run · **Space** jump / wall jump
 - **Right click** or **E** bullet time (slows player, enemies and bullets; drains the meter)
-- Run and jump along a wall to **wall run**, jump into a wall to **wall climb**, jump again to **wall jump** off it
+- Run and jump along a wall to **wall run** (faster than running), jump into a wall to **wall climb**, jump again to **wall jump**
 - **R** restarts at any time
-- The level is one street with buildings on both sides (and behind the start). No stairs: wall-jump up the 3–3.5 m **alleys**
-  between buildings, use the **orange billboards** on lower roofs to continue up to taller neighbours, and **wall-run** along the
-  orange walls to cross the 12 m courtyards (the far east tower can only be reached that way)
-- Guns have a limited range (player ~60 m, enemies engage within 50 m); the crosshair turns red on an enemy in range and shows
-  "Out of range" beyond it
-- 18 enemies at varied heights: rooftops, balconies over the sidewalk, in the road and in the courtyards. They fire 3-round bursts; standing still in the open gets you killed quickly
-- Tuning values (speeds, damage, ranges, bullet time) are in the `CFG` object at the top of the script
+
+### Level design
+
+One critical path from the start roof to the red-tipped spire, built on a few level-design principles:
+
+| Principle | Where it shows up |
+| --- | --- |
+| Flow / momentum, colour-coded route (Mirror's Edge "runner vision") | Every traversal surface is orange; each move sets up the next |
+| Teach → test → combine (Titanfall 2 enforces wall running early) | Sections 1–2 teach the wall run and the wall-jump corridor with no enemies; arenas test them under fire; later sections combine them |
+| Combat arenas joined by traversal ("combat bowls", Gears of War / Ghostrunner) | Two arenas with enemies on floor, ledge and roof layers, hard-cornered cover, an overlook on entry, and a low (fight) and high (wall-run) route |
+| Landmark / "weenie" | The spire's red mast is visible from the start, framed by the first corridor |
+| Forgiving failure | Every gap drops to the ground floor with a climbable way back up |
+| Push-forward combat (Doom), kill-refilled bullet time (Max Payne 2) | Each kill gives +20 health and +35 bullet time |
+
+Sections: start roof → wall-run gap → wall-jump corridor → arena 1 (courtyard) → zig-zag wall-run corridor → arena 2 (spire plaza) → spire top.
+
+- 16 enemies at fixed posts; they fire 3-round bursts, only when they are **on your screen** (with a short reaction delay), and are much less accurate against a wall-running player
+- Guns have a limited range (player ~60 m, enemies 50 m); the crosshair shows "Out of range"
+- Tuning values (speeds, damage, ranges, rewards, bullet time) are in the `CFG` object at the top of the script
