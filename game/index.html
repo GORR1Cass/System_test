@@ -218,6 +218,7 @@ function buildLevel() {
   L.LB = addBox(-30, 0, -128, -16, 9, -80, 'building', 4);
   L.RB = addBox(16, 0, -128, 30, 7, -80, 'building', 0);
   L.RBledge = addBox(13, 3.4, -105, 16, 4, -95, 'ledge');
+  L.LBledge = addBox(-16, 4.4, -112, -13, 5, -104, 'ledge');       // mid layer on the left (climbable from the floor)
   L.wr2 = addBox(-9.5, 0, -96, -8, 21, -80, 'route');
   L.P1 = addBox(-8, 0, -106, -4, 15, -96, 'route');
   L.P2 = addBox(-8, 0, -119, -4, 14, -111, 'route');
@@ -238,12 +239,14 @@ function buildLevel() {
   // --- 6. Arena 2 (spire plaza). Overlook from E; enemies on the towers, a ledge, the floor and the spire top.
   L.F = addBox(-30, 0, -232, -18, 22, -200, 'building', 2);
   L.Fledge = addBox(-18, 9.4, -228, -15, 10, -220, 'ledge');
+  L.Gledge = addBox(15, 5.4, -215, 18, 6, -207, 'ledge');
+  L.spireLedge = addBox(6, 15.4, -253, 9, 16, -247, 'ledge');     // covers the spire shaft from the side
   L.G = addBox(18, 0, -226, 30, 14, -198, 'building', 1);
   L.spire = addBox(-6, 0, -257, 6, 34, -245, 'building', 0);
   L.shaft2 = addBox(-6, 0, -242, 0, 32, -241.5, 'route');        // 3 m shaft up the spire
   addBox(-6, 34, -257, -3.5, 66, -254.5, 'beacon');              // landmark mast, framed by the first corridor from the start
   [[-8, -210, 3, 3, 6], [10, -222, 3, 3, 6], [3, -232, 3, 3, 5]].forEach(([x, z, w, d, h]) => block(x, z, w, d, h, 0, 'cover'));
-  [[4, -205, 6, 1, 1.3], [-13, -224, 1, 6, 1.3], [13, -238, 5, 1, 1.3]].forEach(([x, z, w, d, h]) => block(x, z, w, d, h, 0, 'cover'));
+  [[4, -205, 6, 1, 1.3], [-13, -224, 1, 6, 1.3], [13, -238, 5, 1, 1.3], [-3, -216, 1, 5, 1.3], [-9, -239, 5, 1, 1.3]].forEach(([x, z, w, d, h]) => block(x, z, w, d, h, 0, 'cover'));
   hint(-10, -195, 10, -181, 17, 'The spire: climb the shaft on its front face to reach the top.');
 
   // Skyline beyond the shell (visual)
@@ -259,15 +262,17 @@ function enemySpawns() {
   const on = (b, x, z, area) => ({ x, z, y: b.max.y, area: area || [b.min.x, b.max.x, b.min.z, b.max.z] });
   const ground = (x, z, area) => ({ x, z, y: 0, area });
   return [
-    // Arena 1: floor, side roofs, a ledge, and the exit roof
-    ground(6, -100, [-3, 15, -120, -84]), ground(-1, -119, [-3, 14, -127, -108]),
-    on(L.LB, -22, -100), on(L.RBledge, 14.5, -100), on(L.RB, 23, -115), on(L.D, 5, -140),
-    // Corridor section: E roof and a perch
-    on(L.E, -6, -188), on(L.E, 6, -182), on(L.perch, 12.5, -162),
-    // Arena 2: towers, a ledge, floor, spire top
-    on(L.F, -24, -215), on(L.Fledge, -16.5, -224), on(L.G, 24, -210),
-    ground(6, -218, [-14, 16, -240, -200]), ground(-10, -232, [-14, 16, -240, -200]),
-    on(L.spire, -3, -252), on(L.spire, 2, -248),
+    // Mostly on the floors and on mid-height ledges; only two on rooftops (a sniper over arena 1, and the finale).
+    // Arena 1: three on the floor, two ledges, one roof
+    ground(6, -100, [-3, 15, -120, -84]), ground(-1, -119, [-3, 14, -127, -108]), ground(11, -90, [-3, 15, -120, -84]),
+    on(L.LBledge, -14.5, -108), on(L.RBledge, 14.5, -100), on(L.RB, 23, -115),
+    // Corridor section: one perch watching the corridor
+    on(L.perch, 12.5, -162),
+    // Arena 2: three on the floor, three ledges
+    ground(6, -218, [-14, 16, -240, -200]), ground(-10, -232, [-14, 16, -240, -200]), ground(12, -206, [-14, 16, -240, -200]),
+    on(L.Fledge, -16.5, -224), on(L.Gledge, 16.5, -211), on(L.spireLedge, 7.5, -250),
+    // Finale: one on top of the spire
+    on(L.spire, 0, -251),
   ];
 }
 const PLAYER_SPAWN = { x: 0, y: 6.5, z: 10 };
@@ -1168,7 +1173,7 @@ function setState(s) {
     o.classList.add('clickable');
     o.innerHTML = `<div class="card">
       <h1><span class="b">Cube</span> Rooftops</h1>
-      <p>Make your way to the red-tipped spire and clear the sixteen red cubes on the way. Everything <b>orange</b> is made for moving: wall-run along it, jump between it, climb it. Each kill gives back health and bullet time, so keep pushing forward. Guns reach about 60 m, and enemies only fire when they're on your screen.</p>
+      <p>Make your way to the red-tipped spire and clear the fourteen red cubes on the way. Everything <b>orange</b> is made for moving: wall-run along it, jump between it, climb it. Each kill gives back health and bullet time, so keep pushing forward. Guns reach about 60 m, and enemies only fire when they're on your screen.</p>
       ${CONTROLS}
       <div class="cta">Click to start</div>
       <div class="note">Esc frees the mouse and pauses.</div>

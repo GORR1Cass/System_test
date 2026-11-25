@@ -39,6 +39,6 @@ One critical path from the start roof to the red-tipped spire, built on a few le
 
 Sections: start roof → wall-run gap → wall-jump corridor → arena 1 (courtyard) → zig-zag wall-run corridor → arena 2 (spire plaza) → spire top.
 
-- 16 enemies at fixed posts; they fire 3-round bursts, only when they are **on your screen** (with a short reaction delay), and are much less accurate against a wall-running player
+- 14 enemies at fixed posts, mostly on the arena floors and mid-height ledges (only two on rooftops: one over arena 1 and the finale on the spire); they fire 3-round bursts, only when they are **on your screen** (with a short reaction delay), and are much less accurate against a wall-running player
 - Guns have a limited range (player ~60 m, enemies 50 m); the crosshair shows "Out of range"
 - Tuning values (speeds, damage, ranges, rewards, bullet time) are in the `CFG` object at the top of the script
