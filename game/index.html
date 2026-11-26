@@ -131,7 +131,9 @@ const CFG = {
   stepUp: 0.6,
   wallRunTime: 1.25, wallRunMinSpeed: 3.5, wallRunGravity: 9, wallRunLiftMin: 2.5, wallRunLiftMax: 6,
   wallClimbTime: 0.3, wallClimbSpeed: 7.5,
-  wallJumpOut: 8.5, wallJumpUp: 9.8,
+  wallJumpOut: 8.5, wallJumpUp: 9.8,           // neutral wall jump (holding along the wall, or no input)
+  wallJumpUpOut: 2.5, wallJumpUpUp: 13,        // holding toward the wall: jump mostly up
+  wallJumpAwayOut: 12, wallJumpAwayUp: 8,      // holding away from the wall: leap out
   playerHP: 100, enemyHP: 75,
   playerBulletSpeed: 95, playerDamage: 25, playerFireCooldown: 0.13, playerRange: 60,
   enemyBulletSpeed: 42, enemyDamage: 12, enemyRange: 50, enemyBulletRange: 60,
@@ -210,7 +212,7 @@ function buildLevel() {
   L.c1l = addBox(-3.25, 6, -50, -1.75, 20, -38, 'route');
   L.c1r = addBox(1.75, 6, -50, 3.25, 20, -38, 'route');
   L.C = addBox(-8, 0, -80, 8, 16, -50, 'building', 2);
-  hint(-8, -50, 8, -34, 5, 'Walk between the <b>orange walls</b> and keep jumping from one to the other to climb. At the top, jump into the building ahead.');
+  hint(-8, -50, 8, -34, 5, 'Walk between the <b>orange walls</b>. Jump while holding toward the opposite wall to leap across; keep going to climb. At the top, run into the building ahead and jump while holding toward it to pop up.');
 
   // --- 4. Arena 1 (courtyard). Overlook from C. Low route: across the floor, up the shaft in front of D.
   //        High route: wall-run the left wall, hop two pillars, wall-run again onto D.
@@ -227,7 +229,7 @@ function buildLevel() {
   L.shaft1 = addBox(-10, 0, -125, -3, 13.5, -124.5, 'route');      // 3 m shaft in front of D
   [[-4, -90, 3, 3, 6], [9, -104, 3, 3, 6], [3, -116, 3, 3, 5]].forEach(([x, z, w, d, h]) => block(x, z, w, d, h, 0, 'cover'));
   [[4, -86, 6, 1, 1.3], [12, -112, 1, 6, 1.3], [7, -123, 5, 1, 1.3], [-1, -102, 1, 5, 1.3]].forEach(([x, z, w, d, h]) => block(x, z, w, d, h, 0, 'cover'));
-  hint(-10, -128, 0, -118, -1, 'Climb the shaft between the <b>orange wall</b> and the building.', 9);
+  hint(-10, -128, 0, -118, -1, 'Climb the shaft: jump from wall to wall holding toward the other side. Hold toward a wall when you jump to go straight up.', 9);
 
   // --- 5. Combine: wall-run corridor. Two walls 3.5 m apart; jump from wall to wall to gain height onto E.
   L.cl = addBox(-3.25, 0, -172, -1.75, 22, -150, 'route');
@@ -243,7 +245,7 @@ function buildLevel() {
   L.spireLedge = addBox(6, 15.4, -253, 9, 16, -247, 'ledge');     // covers the spire shaft from the side
   L.G = addBox(18, 0, -226, 30, 14, -198, 'building', 1);
   L.spire = addBox(-6, 0, -257, 6, 34, -245, 'building', 0);
-  L.shaft2 = addBox(-6, 0, -242, 0, 32, -241.5, 'route');        // 3 m shaft up the spire
+  L.shaft2 = addBox(-6, 0, -242, 0, 35.5, -241.5, 'route');        // 3 m shaft up the spire
   addBox(-6, 34, -257, -3.5, 66, -254.5, 'beacon');              // landmark mast, framed by the first corridor from the start
   [[-8, -210, 3, 3, 6], [10, -222, 3, 3, 6], [3, -232, 3, 3, 5]].forEach(([x, z, w, d, h]) => block(x, z, w, d, h, 0, 'cover'));
   [[4, -205, 6, 1, 1.3], [-13, -224, 1, 6, 1.3], [13, -238, 5, 1, 1.3], [-3, -216, 1, 5, 1.3], [-9, -239, 5, 1, 1.3]].forEach(([x, z, w, d, h]) => block(x, z, w, d, h, 0, 'cover'));
@@ -654,7 +656,7 @@ function clearDynamic() {
 function restart() {
   clearDynamic();
   enemies = enemySpawns().map(createEnemy);
-  Object.assign(player, { hp: CFG.playerHP, alive: true, grounded: false, coyote: 0, jumpBuf: 0, wallState: 'none', wallTimer: 0, wallNormal: null, lastWallNormal: null, wallJumpLock: 0, fireCd: 0, flash: 0 });
+  Object.assign(player, { hp: CFG.playerHP, alive: true, grounded: false, coyote: 0, jumpBuf: 0, wallState: 'none', wallTimer: 0, wallNormal: null, lastWallNormal: null, lastJumpWall: null, wallJumpLock: 0, fireCd: 0, flash: 0 });
   player.pos.set(PLAYER_SPAWN.x, PLAYER_SPAWN.y, PLAYER_SPAWN.z);
   player.vel.set(0, 0, 0);
   player.mesh.visible = true;
@@ -933,7 +935,7 @@ function updatePlayer(dt, rdt) {
   P.jumpBuf -= dt;
   P.coyote = P.grounded ? CFG.coyote : Math.max(0, P.coyote - dt);
   P.wallJumpLock -= dt;
-  if (P.grounded) P.lastWallNormal = null;
+  if (P.grounded) { P.lastWallNormal = null; P.lastJumpWall = null; }
 
   const wall = P.grounded ? null : wallProbe(P, hasInput ? wish : null);
   const fresh = wall && (!P.lastWallNormal || wall.x * P.lastWallNormal.x + wall.z * P.lastWallNormal.z < 0.5);
@@ -942,12 +944,20 @@ function updatePlayer(dt, rdt) {
   if (P.jumpBuf > 0 && control) {
     if (P.coyote > 0) {
       P.vel.y = CFG.jumpVel; P.coyote = 0; P.jumpBuf = 0; P.grounded = false;
-    } else if (wall && P.wallJumpLock <= 0) {
+    } else if (wall && P.wallJumpLock <= 0 && !(P.lastJumpWall && wall.x * P.lastJumpWall.x + wall.z * P.lastJumpWall.z > 0.5)) {
+      // (one wall jump per wall until you touch the ground or another wall, so 'up' jumps can't climb forever)
       const vn = P.vel.x * wall.x + P.vel.z * wall.z;
       const ax = P.vel.x - wall.x * vn, az = P.vel.z - wall.z * vn;   // keep speed along the wall
-      P.vel.x = ax + wall.x * CFG.wallJumpOut;     // keep the speed along the wall, push away from it; no extra speed
-      P.vel.z = az + wall.z * CFG.wallJumpOut;
-      P.vel.y = CFG.wallJumpUp;
+      // Steer the wall jump with the movement keys: toward the wall = up, away from it = out, along it = neutral.
+      const a = hasInput ? wish.x * wall.x + wish.z * wall.z : 0;   // +1 away from the wall, -1 into it
+      let out = CFG.wallJumpOut, up = CFG.wallJumpUp;
+      if (a > 0) { out += (CFG.wallJumpAwayOut - out) * a; up += (CFG.wallJumpAwayUp - up) * a; }
+      else if (a < 0) { out += (CFG.wallJumpUpOut - out) * -a; up += (CFG.wallJumpUpUp - up) * -a; }
+      P.vel.x = ax + wall.x * out;     // keep the speed along the wall; no extra forward speed
+      P.vel.z = az + wall.z * out;
+      P.vel.y = up;
+      P.lastWallJump = a < -0.3 ? 'up' : a > 0.3 ? 'away' : 'neutral';
+      P.lastJumpWall = { x: wall.x, z: wall.z };
       P.lastWallNormal = { x: wall.x, z: wall.z };
       P.wallState = 'none'; P.wallJumpLock = 0.18; P.jumpBuf = 0;
     }
@@ -1159,7 +1169,8 @@ const CONTROLS = `
     <div><span>Shoot</span><span class="key">Left click</span></div>
     <div><span>Move</span><span><span class="key">W</span> <span class="key">A</span> <span class="key">S</span> <span class="key">D</span></span></div>
     <div><span>Run</span><span class="key">Shift</span></div>
-    <div><span>Jump / wall jump</span><span class="key">Space</span></div>
+    <div><span>Jump</span><span class="key">Space</span></div>
+    <div><span>Wall jump up / away</span><span>Space + toward / away from wall</span></div>
     <div><span>Bullet time</span><span><span class="key">Right click</span> or <span class="key">E</span></span></div>
     <div><span>Wall run</span><span>Run and jump along a wall</span></div>
     <div><span>Wall climb</span><span>Jump into a wall</span></div>
