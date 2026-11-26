@@ -25,6 +25,8 @@ Third-person parkour shooter prototype in plain HTML + JavaScript (Three.js from
 - **Steer wall jumps** with the movement keys: hold toward the wall to jump up it, away from it to leap out, along it (or nothing) for a balanced jump. One wall jump per wall until you land or touch another wall
 - **R** restarts at any time · **M** turns sound on/off (all sounds are synthesized in the browser; they start after your first click)
 
+**Goal:** reach the top of the red-tipped spire. Fighting is optional (kills refill health and bullet time); clearing every enemy does not end the level. The top-right panel shows the distance to the spire.
+
 ### Level design
 
 One critical path from the start roof to the red-tipped spire, built on a few level-design principles:
@@ -40,7 +42,7 @@ One critical path from the start roof to the red-tipped spire, built on a few le
 
 Each section has its own look (sandstone old town, construction site, brick courtyard, slate industrial, glass plaza) and the sky shifts from hazy to deep blue toward the spire. The camera keeps to the open side in tight spaces and the player turns see-through if the camera gets very close.
 
-Sections: start roof → wall-run channel (the only way across; the right side is a 12 m block) → enclosed climbing well (four platforms, closed sides) → arena 1 (courtyard) → zig-zag wall-run corridor → arena 2 (spire plaza) → spire top.
+Sections: start roof → wall-run channel (the only way across; the right side is a 12 m block) → enclosed climbing well (four platforms, closed sides) → arena 1 (courtyard) → zig-zag wall-run corridor → arena 2 (spire plaza) → **spire run**: wall-run out over the plaza, hop three rising platforms, wall-run toward the spire, then climb three stepped buttresses (or wall-run along the spire face between the last two) to the top. Falling into the plaza: a shaft leads back up to the start of the run.
 
 - 14 enemies of three types at fixed posts: **riflemen** (keep their distance, 3-round bursts), **snipers** (darker, long barrel; a laser tracks you for ~1 s, locks, then one heavy shot — move when it locks), **rushers** (smaller, brighter; charge in and fire a close-range spread). Enemies steer around walls and cover and recover if they get stuck. Mostly on the arena floors and mid-height ledges (only two on rooftops); riflemen and rushers only fire when they are **on your screen** (with a short reaction delay); snipers can fire from off screen, since their laser and a rising tone warn you and the shot can be dodged, and are much less accurate against a wall-running player
 - Enemies posted 7 m up or lower decide every second or two whether to hold their post or jump down to the floor: they drop to escape when you reach their level up close, or to hunt you when they lose sight of you on the floor. Higher posts always stay

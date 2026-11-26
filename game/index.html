@@ -47,7 +47,10 @@ canvas { display: block; position: fixed; inset: 0; width: 100%; height: 100%; }
 @keyframes jolt { 0% { transform: translate(0, 0); } 25% { transform: translate(-5px, 2px); } 50% { transform: translate(4px, -2px); } 75% { transform: translate(-2px, 1px); } 100% { transform: translate(0, 0); } }
 
 #targets { top: calc(env(safe-area-inset-top, 0px) + 16px); right: max(16px, env(safe-area-inset-right, 0px)); display: flex; gap: 10px; align-items: baseline; }
-#enemyCount { font-size: 22px; color: var(--enemy); }
+#targets { flex-direction: column; gap: 4px; align-items: stretch; min-width: 170px; }
+.trow { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+#goalDist { font-size: 18px; color: #ff6b5e; }
+#enemyCount { font-size: 18px; color: var(--enemy); }
 #hint { position: fixed; left: max(16px, env(safe-area-inset-left, 0px)); bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); display: flex; gap: 8px; align-items: center; text-shadow: 0 1px 3px rgba(0,0,0,.9); pointer-events: none; }
 
 #crosshair { position: fixed; left: 50%; top: 50%; width: 22px; height: 22px; transform: translate(-50%, -50%); pointer-events: none; --ch: var(--ink); }
@@ -104,7 +107,7 @@ body.slowmo #slow { opacity: 1; }
   <div class="row"><span class="label">Bullet time</span><span class="label">RMB / E</span></div>
   <div class="bar thin"><div id="focusFill" class="fill focus"></div></div>
 </div>
-<div id="targets" class="panel"><span class="label">Enemies left</span><span id="enemyCount" class="num">0</span></div>
+<div id="targets" class="panel"><div class="trow"><span class="label">Spire</span><span id="goalDist" class="num">0 m</span></div><div class="trow"><span class="label">Enemies left</span><span id="enemyCount" class="num">0</span></div></div>
 <div id="hint" class="label"><span class="key">R</span> Restart <span class="key">M</span> <span id="soundState">Sound on</span></div>
 <div id="crosshair"></div>
 <div id="rangeTag" hidden>Out of range</div>
@@ -347,11 +350,27 @@ function buildLevel() {
   L.spireLedge = addBox(6, 15.4, -253, 9, 16, -247, 'ledge');     // covers the spire shaft from the side
   L.G = addBox(18, 0, -226, 30, 14, -198, 'building', 'glass1');
   L.spire = addBox(-6, 0, -257, 6, 34, -245, 'building', 'spire');
-  L.shaft2 = addBox(-6, 0, -242, 0, 35.5, -241.5, 'route');        // 3 m shaft up the spire
+  // --- 7. The spire run (goal). From E's roof: wall-run the orange wall on the right out over the plaza,
+  //        hop three rising platforms, wall-run the orange wall on the left, then climb the stepped
+  //        buttresses on the spire's face (the gap between the 2nd and 3rd can be wall-run along the face).
+  L.wrA = addBox(10.5, 0, -211, 12, 26, -195, 'route');            // wall run 1: right side, from E's edge
+  L.Pa = addBox(6, 0, -214, 10, 17.5, -207, 'route');
+  L.Pb = addBox(1, 0, -220, 5, 18.7, -216, 'route');
+  L.Pc = addBox(-4, 0, -226, 0, 19.9, -222, 'route');
+  L.wrB = addBox(-5.5, 0, -236, -4, 30, -226, 'route');            // wall run 2: left side, from Pc's edge
+  L.Pd = addBox(-4, 0, -241, 3, 19.5, -236, 'route');             // wide enough to line up square in front of B1
+  L.B1 = addBox(-1, 0, -245, 6, 23.5, -242, 'route');              // buttresses against the spire face
+  L.B2 = addBox(-6, 0, -245, -2.5, 27.5, -242, 'route');           // 1.5 m gap after B1: jump across into its face and pull up
+  L.B3 = addBox(2.5, 23.5, -245, 6, 30.5, -242, 'route');          // stacked on B1, leaving B1's top exposed at x -1..2.5 (a safe landing if you miss B3)
+  addBox(-1.5, 34, -252.5, 1.5, 34.06, -249.5, 'goal', 0, deco);   // goal pad on the spire top
+  L.shaftE = addBox(-10, 0, -198.5, -4, 20, -198, 'route');        // fell into the plaza? climb back up to E here
   addBox(-6, 34, -257, -3.5, 66, -254.5, 'beacon');              // landmark mast, framed by the first corridor from the start
   [[-8, -210, 3, 3, 6], [10, -222, 3, 3, 6], [3, -232, 3, 3, 5]].forEach(([x, z, w, d, h]) => block(x, z, w, d, h, 0, 'cover'));
   [[4, -205, 6, 1, 1.3], [-13, -224, 1, 6, 1.3], [13, -238, 5, 1, 1.3], [-3, -216, 1, 5, 1.3], [-9, -239, 5, 1, 1.3]].forEach(([x, z, w, d, h]) => block(x, z, w, d, h, 0, 'cover'));
-  hint(-10, -195, 10, -181, 17, 'The spire: climb the shaft on its front face to reach the top.');
+  hint(-10, -195, 10, -181, 17, '<b>Goal:</b> the top of the spire. Run along the edge by the <b>orange wall</b> on the right and jump off to wall-run out to the platforms.');
+  hint(-4, -226, 10, -207, 17, 'Hop the platforms, then wall-run the <b>orange wall</b> on the left toward the spire.');
+  hint(-6, -245, 6, -236, 19, 'Climb the <b>orange buttresses</b> up the spire: jump into each one and pull yourself up. From the left one, you can wall-run along the spire to the right.');
+  hint(-12, -205, -2, -195, -1, 'Fell? Climb the shaft between the <b>orange wall</b> and the roof to get back to the start of the run.', 3);
 
   // Skyline beyond the shell (visual)
   const sky = [[-55, 0, 14, 30, 50, 'warm1'], [-58, -70, 16, 40, 64, 'raw'], [-54, -150, 12, 50, 46, 'slate1'], [-60, -230, 18, 40, 70, 'glass0'],
@@ -533,7 +552,7 @@ const STYLES = {
   glass0: { tex: 'glass', color: '#d8e8f1' }, glass1: { tex: 'glass', color: '#c5dae8' }, marble: { tex: 'window', color: '#eeece6' },
   spire: { tex: 'glass', color: '#56708c' },
 };
-const KIND_COLORS = { tiles: '#7d6e68', plaza: '#cfcbc1', wall: '#56616c', ground: '#7c857e', boundary: '#8a9097', route: '#e8913f', ledge: '#6f7780', cover: '#7f878f', pole: '#3b4148', asphalt: '#4a4f55', sidewalk: '#9da39f', paint: '#e9e6da' };
+const KIND_COLORS = { goal: '#ffd84d', tiles: '#7d6e68', plaza: '#cfcbc1', wall: '#56616c', ground: '#7c857e', boundary: '#8a9097', route: '#e8913f', ledge: '#6f7780', cover: '#7f878f', pole: '#3b4148', asphalt: '#4a4f55', sidewalk: '#9da39f', paint: '#e9e6da' };
 
 // --- static geometry is merged into one mesh per material (a handful of draw calls for the whole city)
 const batches = new Map();
@@ -977,7 +996,6 @@ function damageEnemy(e, dmg, point, dir) {
     rewardKill();
     SFX.kill();
     hitStop = 0.07;                                                         // brief freeze-frame on a kill
-    if (enemies.every((x) => !x.alive)) winTimer = 1.4;
   }
 }
 function rewardKill() {
@@ -1494,8 +1512,8 @@ function updateCamera(rdt) {
 
 // ------------------------------------------------------------------ HUD & overlays
 // Only touch the DOM when a value actually changes.
-const hud = { hp: -1, focus: -1, enemies: -1, tag: null, hurt: -1, ch: null, tip: null };
-const el = { hpText: $('hpText'), hpFill: $('hpFill'), vitals: $('vitals'), focusFill: $('focusFill'), enemyCount: $('enemyCount'),
+const hud = { hp: -1, focus: -1, enemies: -1, tag: null, hurt: -1, ch: null, tip: null, goal: -1 };
+const el = { hpText: $('hpText'), hpFill: $('hpFill'), vitals: $('vitals'), focusFill: $('focusFill'), enemyCount: $('enemyCount'), goalDist: $('goalDist'),
   moveTag: $('moveTag'), hurt: $('hurt'), crosshair: $('crosshair'), rangeTag: $('rangeTag'), reward: $('reward'), tip: $('tip') };
 function updateHUD() {
   const hp = Math.ceil(player.hp);
@@ -1507,6 +1525,8 @@ function updateHUD() {
   }
   const fo = Math.round(focus);
   if (fo !== hud.focus) { hud.focus = fo; el.focusFill.style.transform = `scaleX(${focus / CFG.focusMax})`; }
+  const gd = Math.round(Math.hypot(player.pos.x - (L.spire.min.x + L.spire.max.x) / 2, player.pos.y - L.spire.max.y, player.pos.z - (L.spire.min.z + L.spire.max.z) / 2));
+  if (gd !== hud.goal) { hud.goal = gd; el.goalDist.textContent = gd + ' m'; }
   let left = 0; for (const e of enemies) if (e.alive) left++;
   if (left !== hud.enemies) { hud.enemies = left; el.enemyCount.textContent = left; }
   const tag = !player.alive ? '' : player.wallState === 'run' ? 'Wall run' : player.wallState === 'climb' ? 'Wall climb' : bulletTime ? 'Bullet time' : '';
@@ -1545,7 +1565,7 @@ function setState(s) {
     o.classList.add('clickable');
     o.innerHTML = `<div class="card">
       <h1><span class="b">Cube</span> Rooftops</h1>
-      <p>Make your way to the red-tipped spire and clear the fourteen red cubes on the way. Everything <b>orange</b> is made for moving: wall-run along it, jump between it, climb it. Bullet time only refills when you kill, and each kill also gives back health, so keep pushing forward. Guns reach about 60 m. Most enemies only fire when they're on your screen; snipers can fire from anywhere, but a red laser and a rising tone warn you first.</p>
+      <p><b>Goal: reach the top of the red-tipped spire.</b> Fourteen red cubes stand in the way; fighting them is up to you. Everything <b>orange</b> is made for moving: wall-run along it, jump between it, climb it. Bullet time only refills when you kill, and each kill also gives back health, so keep pushing forward. Guns reach about 60 m. Most enemies only fire when they're on your screen; snipers can fire from anywhere, but a red laser and a rising tone warn you first.</p>
       ${CONTROLS}
       <div class="cta">Click to start</div>
       <div class="note">Esc frees the mouse and pauses.</div>
@@ -1561,8 +1581,9 @@ function setState(s) {
   } else if (s === 'won') {
     o.classList.add('passive');
     const acc = shotsFired ? Math.round(shotsHit / shotsFired * 100) : 0;
-    o.innerHTML = `<div class="card won"><h1>Level clear</h1>
-      <p>All ${enemies.length} enemies down in ${elapsed.toFixed(1)} s with ${Math.ceil(player.hp)} health left. Accuracy ${acc}%.</p>
+    const down = enemies.filter((e) => !e.alive).length;
+    o.innerHTML = `<div class="card won"><h1>You reached the spire</h1>
+      <p>Top of the spire in ${elapsed.toFixed(1)} s with ${Math.ceil(player.hp)} health left. ${down} of ${enemies.length} enemies taken down. Accuracy ${acc}%.</p>
       <div class="cta">Press <span class="key">R</span> to restart</div></div>`;
   } else {
     o.hidden = true;
@@ -1660,7 +1681,11 @@ function simulate(rdt) {
   updateParticles(dt);
   updateChunks(dt);
 
-  if (winTimer > 0) { winTimer -= rdt; if (winTimer <= 0 && state === 'playing') { setBulletTime(false); setState('won'); } }
+  // Win: stand on top of the spire. Clearing enemies is optional.
+  const S = L.spire, pp = player.pos;
+  if (state === 'playing' && player.alive && player.grounded && pp.y - 0.5 >= S.max.y - 0.05 && pp.x > S.min.x && pp.x < S.max.x && pp.z > S.min.z && pp.z < S.max.z) {
+    setBulletTime(false); setState('won');
+  }
   hurt = Math.max(0, hurt - rdt * 1.4);
   updateTrails(rdt);
   if (player.alive && player.hp <= 30 && state === 'playing') { heartT -= rdt; if (heartT <= 0) { heartT = 0.85; SFX.heartbeat(); } } else heartT = 0;
