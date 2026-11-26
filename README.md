@@ -19,7 +19,7 @@ python radar_distance.py --simulate        # testa sem hardware
 
 Third-person parkour shooter prototype in plain HTML + JavaScript (Three.js from a CDN). Open `game/index.html` in a browser – no build step. The level is built only from boxes.
 
-- **Mouse** aim · **Left click** shoot · **WASD** move · **Shift** run · **Space** jump / wall jump
+- **Mouse** aim · **Left click** shoot (one shot per click, at most ~3 per second) · **WASD** move · **Shift** run · **Space** jump / wall jump
 - **Right click** or **E** bullet time (slows player, enemies and bullets; drains the meter)
 - Run and jump along a wall to **wall run** (it holds you level and never lifts you; you keep the speed you arrive with and slowly lose it; too slow and you slide off), jump into a wall to **wall climb**, jump again to **wall jump**
 - **Steer wall jumps** with the movement keys: hold toward the wall to jump up it, away from it to leap out, along it (or nothing) for a balanced jump. One wall jump per wall until you land or touch another wall

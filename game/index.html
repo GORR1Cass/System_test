@@ -139,7 +139,8 @@ const CFG = {
   wallJumpUpOut: 2.5, wallJumpUpUp: 13,        // holding toward the wall: jump mostly up
   wallJumpAwayOut: 12, wallJumpAwayUp: 8,      // holding away from the wall: leap out
   playerHP: 100, enemyHP: 75,
-  playerBulletSpeed: 95, playerDamage: 25, playerFireCooldown: 0.13, playerRange: 60,
+  playerBulletSpeed: 95, playerDamage: 25, playerFireCooldown: 0.33, fireBuffer: 0.12,   // one shot per click, at most ~3 per second; a click just before the gun is ready still fires
+  playerRange: 60,
   enemyBulletSpeed: 52, enemyDamage: 12, enemyRange: 60, enemyBulletRange: 70,
   enemyBurst: 3, enemyBurstGap: 0.11, enemyBurstDelay: 0.85,  // 3-round bursts, ~0.85-1.2 s apart
   enemySpread: 0.2, enemySpreadPerM: 0.008, enemyLead: 0.85, // aim: base scatter, extra scatter per metre, how far ahead they lead you
@@ -818,7 +819,7 @@ function wallProbe(body, prefer) {
 let state = 'start';            // start | playing | paused | dead | won
 let fallbackAim = false, everLocked = false;
 const keys = {};
-let firing = false, jumpQueued = false;
+let fireQueued = 0, jumpQueued = false;   // fireQueued: time left on a buffered click
 let yaw = 0, pitch = -0.05;
 let bulletTime = false, timeScale = 1, focus = CFG.focusMax, focusDelay = 0;
 let hurt = 0, shake = 0, camRoll = 0, camPivotY = PLAYER_SPAWN.y, hitStop = 0, heartT = 0, onSpire = false;
@@ -893,7 +894,7 @@ function restart() {
   yaw = 0; pitch = -0.05; camPivotY = player.pos.y;
   setBulletTime(false); timeScale = 1; focus = CFG.focusMax; focusDelay = 0;
   hurt = 0; shake = 0; elapsed = 0; winTimer = -1; shotsFired = 0; shotsHit = 0;
-  jumpQueued = false; firing = false;
+  jumpQueued = false; fireQueued = 0;
   setState('playing');
 }
 
@@ -1298,7 +1299,8 @@ function updatePlayer(dt, rdt) {
   P.mesh.rotation.set(0, yaw, 0);
   P.gun.rotation.x = pitch;
 
-  if (control && firing && P.fireCd <= 0) { playerShoot(); P.fireCd = CFG.playerFireCooldown; }
+  fireQueued -= rdt;
+  if (control && fireQueued > 0 && P.fireCd <= 0) { playerShoot(); P.fireCd = CFG.playerFireCooldown; fireQueued = 0; }
 }
 
 // ------------------------------------------------------------------ enemies
@@ -1574,7 +1576,7 @@ function updateHUD() {
 const CONTROLS = `
   <div class="controls">
     <div><span>Aim</span><span>Mouse</span></div>
-    <div><span>Shoot</span><span class="key">Left click</span></div>
+    <div><span>Shoot (one shot per click)</span><span class="key">Left click</span></div>
     <div><span>Move</span><span><span class="key">W</span> <span class="key">A</span> <span class="key">S</span> <span class="key">D</span></span></div>
     <div><span>Run</span><span class="key">Shift</span></div>
     <div><span>Jump</span><span class="key">Space</span></div>
@@ -1639,14 +1641,13 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyR' && state !== 'start') { restart(); lockPointer(); }   // restart at any moment
 });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
-addEventListener('blur', () => { for (const k in keys) keys[k] = false; firing = false; });
+addEventListener('blur', () => { for (const k in keys) keys[k] = false; fireQueued = 0; });
 addEventListener('contextmenu', (e) => e.preventDefault());
 addEventListener('mousedown', (e) => {
   if (state !== 'playing') return;
-  if (e.button === 0) firing = true;
+  if (e.button === 0) fireQueued = CFG.fireBuffer;   // each press fires one shot
   if (e.button === 2) setBulletTime(!bulletTime);
 });
-addEventListener('mouseup', (e) => { if (e.button === 0) firing = false; });
 addEventListener('mousemove', (e) => {
   const locked = document.pointerLockElement === canvas;
   if (!locked && !fallbackAim) return;
@@ -1671,7 +1672,7 @@ document.addEventListener('pointerlockerror', onLockError);
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === canvas;
   if (locked) everLocked = true;
-  else if (state === 'playing' && !fallbackAim) { firing = false; setState('paused'); }
+  else if (state === 'playing' && !fallbackAim) { fireQueued = 0; setState('paused'); }
 });
 $('overlay').addEventListener('click', () => {
   SFX.init();
@@ -1763,10 +1764,10 @@ requestAnimationFrame(frame);
 window.__game = {
   player, boxes, CFG, keys, simulate, restart, updateCamera, updateAim, renderer, scene, camera,
   get enemies() { return enemies; }, L, HINTS, get state() { return state; },
-  get bullets() { return bullets; }, aim,
+  get bullets() { return bullets; }, aim, get shotsFired() { return shotsFired; },
   setView(y, p) { yaw = y; pitch = p; },
   jump() { jumpQueued = true; },
-  setFiring(v) { firing = v; },
+  setFiring(v) { if (v) fireQueued = CFG.fireBuffer; },   // tests: one call = one click
   bulletTime: setBulletTime, get timeScale() { return timeScale; }, get focus() { return focus; }, set focus(v) { focus = v; },
   noLock() { fallbackAim = true; },
   camPos: () => camera.position.clone(), frustumHas: (p) => frustum.containsPoint(p), inSolid: (p) => !!pointBox(p), get camShoulder() { return camShoulder; },
