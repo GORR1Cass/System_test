@@ -139,14 +139,16 @@ const CFG = {
   wallJumpAwayOut: 12, wallJumpAwayUp: 8,      // holding away from the wall: leap out
   playerHP: 100, enemyHP: 75,
   playerBulletSpeed: 95, playerDamage: 25, playerFireCooldown: 0.13, playerRange: 60,
-  enemyBulletSpeed: 42, enemyDamage: 12, enemyRange: 50, enemyBulletRange: 60,
-  enemyBurst: 3, enemyBurstGap: 0.13, enemyBurstDelay: 1.3,   // 3-round bursts, ~1.3-1.8 s apart
+  enemyBulletSpeed: 52, enemyDamage: 12, enemyRange: 60, enemyBulletRange: 70,
+  enemyBurst: 3, enemyBurstGap: 0.11, enemyBurstDelay: 0.85,  // 3-round bursts, ~0.85-1.2 s apart
+  enemySpread: 0.2, enemySpreadPerM: 0.008, enemyLead: 0.85, // aim: base scatter, extra scatter per metre, how far ahead they lead you
+  enemyFleeDist: 10,                           // riflemen only back off when you're closer than this
   killHeal: 20, killFocus: 35,                // push-forward combat: kills refill health and bullet time
   wallRunDecay: 3,                             // m/s lost per second on the wall: a wall run never speeds you up
-  enemySpreadVsWallRun: 2.4,                   // enemies struggle to hit a wall-running / fast airborne player
-  enemyReaction: 0.6,                          // seconds an enemy waits after coming on screen before firing
-  sniperRange: 80, sniperCharge: 1.3, sniperLock: 0.3, sniperDamage: 28, sniperBulletSpeed: 95,
-  rusherRange: 14, rusherPellets: 4, rusherPelletDamage: 6,
+  enemySpreadVsWallRun: 1.9,                   // enemies struggle to hit a wall-running / fast airborne player
+  enemyReaction: 0.35,                         // seconds an enemy waits after coming on screen before firing
+  sniperRange: 85, sniperCharge: 1.0, sniperLock: 0.25, sniperDamage: 30, sniperBulletSpeed: 110, sniperCooldown: 1.6,
+  rusherRange: 15, rusherPellets: 5, rusherPelletDamage: 6, rusherSpeed: 12, rusherCooldown: 1.0,
   enemyMaxDrop: 7,                             // enemies posted this high or lower may decide to jump down to the floor
   bulletTimeScale: 0.25, focusMax: 100, focusDrain: 24,   // the meter does not refill on its own: only kills refill it
   mouseSens: 0.0022,
@@ -347,6 +349,8 @@ function buildLevel() {
   addBox(-18, 0, -245, 18, 0.02, -195, 'plaza', 0, deco);           // plaza stone
   L.Fledge = addBox(-18, 9.4, -228, -15, 10, -220, 'ledge');
   L.Gledge = addBox(15, 5.4, -215, 18, 6, -207, 'ledge');
+  L.Fledge2 = addBox(-18, 15.4, -212, -15, 16, -204, 'ledge');     // higher ledge on F, overlooking the platforms
+  L.Mledge = addBox(-18, 23.4, -243, -15, 24, -236, 'ledge');      // ledge on the far-left building, level with the buttresses
   L.spireLedge = addBox(6, 15.4, -253, 9, 16, -247, 'ledge');     // covers the spire shaft from the side
   L.G = addBox(18, 0, -226, 30, 14, -198, 'building', 'glass1');
   L.spire = addBox(-6, 0, -257, 6, 34, -245, 'building', 'spire');
@@ -394,10 +398,10 @@ function enemySpawns() {
     on(L.RB, 23, -115, null, null, 'sniper'),
     // Corridor section: a sniper on the perch watching the corridor
     on(L.perch, 12.5, -162, null, null, 'sniper'),
-    // Arena 2: two rushers and a rifleman on the floor, snipers high, a rifleman on the low ledge
-    ground(6, -218, A2, 'rusher'), ground(-10, -232, A2, 'rifle'), ground(12, -206, A2, 'rusher'),
-    on(L.Fledge, -16.5, -224, null, null, 'sniper'), on(L.Gledge, 16.5, -211, null, { dir: [-1, 0], area: A2 }, 'rifle'),
-    on(L.spireLedge, 7.5, -250, null, null, 'sniper'),
+    // Arena 2 (spire plaza): nobody on the ground. Everyone holds a raised post around the spire run.
+    on(L.Fledge, -16.5, -224, null, null, 'sniper'), on(L.Fledge2, -16.5, -208, null, null, 'rifle'),
+    on(L.Gledge, 16.5, -211, null, null, 'rifle'), on(L.G, 24, -214, null, null, 'rifle'),
+    on(L.Mledge, -16.5, -239.5, null, null, 'rifle'), on(L.spireLedge, 7.5, -250, null, null, 'sniper'),
     // Finale: one on top of the spire
     on(L.spire, 0, -251, null, null, 'rifle'),
   ];
@@ -1338,17 +1342,17 @@ function updateEnemy(e, dt) {
   } else if (P.alive) {
     if (e.type === 'rusher') {
       // charge in, weaving a little; circle once close
-      if (dist > 7) { mx = nx + px * e.strafeDir * 0.35; mz = nz + pz * e.strafeDir * 0.35; speed = 10.5; }
+      if (dist > 7) { mx = nx + px * e.strafeDir * 0.35; mz = nz + pz * e.strafeDir * 0.35; speed = CFG.rusherSpeed; }
       else if (dist < 5) { mx = px * e.strafeDir - nx * 0.7; mz = pz * e.strafeDir - nz * 0.7; speed = 7; }   // too close: give a little room
       else { mx = px * e.strafeDir; mz = pz * e.strafeDir; speed = 7; }                                          // circle at shotgun range
       e.running = true;
     } else if (e.type === 'sniper') {
-      // hold the post: creep to the edge until it has a line on you, shuffle slowly, freeze while aiming
-      if (!e.los) { mx = nx; mz = nz; speed = 3; } else { mx = px * e.strafeDir; mz = pz * e.strafeDir; speed = 1.5; }
+      // hold the post: creep to the edge until it has a line on you, then hold still
+      if (!e.los) { mx = nx; mz = nz; speed = 3; } else { mx = px * e.strafeDir; mz = pz * e.strafeDir; speed = 0; }   // has a line on you: hold still
       if (e.charge > 0) speed = 0;
       e.running = false;
     } else {
-      if (dist < 13) { mx = -nx; mz = -nz; speed = 9; e.running = true; }                         // run away
+      if (dist < CFG.enemyFleeDist) { mx = -nx; mz = -nz; speed = 9; e.running = true; }         // run away
       else if (dist < 22) { mx = -nx * 0.5 + px * e.strafeDir; mz = -nz * 0.5 + pz * e.strafeDir; speed = 6; e.running = true; } // back off while strafing
       else { mx = nx * 0.6 + px * e.strafeDir * 0.8; mz = nz * 0.6 + pz * e.strafeDir * 0.8; speed = 4.5; e.running = false; } // push to the edge for a shot
     }
@@ -1436,7 +1440,7 @@ function updateEnemy(e, dt) {
         const dir = dirL.clone().addScaledVector(randUnit(_p), 0.012 * (evasive ? CFG.enemySpreadVsWallRun : 1)).normalize();
         spawnBullet('enemy', eye.clone().addScaledVector(dir, 1.2), dir, { speed: CFG.sniperBulletSpeed, damage: CFG.sniperDamage, range: CFG.sniperRange + 10, kind: 'sniper' });
         SFX.enemyShot(eye, 'sniper');
-        e.fireTimer = 2.4 + Math.random() * 0.8;
+        e.fireTimer = CFG.sniperCooldown + Math.random() * 0.6;
       }
     }
     return;
@@ -1450,14 +1454,14 @@ function updateEnemy(e, dt) {
       spawnBullet('enemy', eye.clone().addScaledVector(dir, 0.6), dir, { damage: CFG.rusherPelletDamage, range: CFG.rusherRange + 6, kind: 'rusher' });
     }
     SFX.enemyShot(eye, 'rusher');
-    e.fireTimer = 1.3 + Math.random() * 0.4;
+    e.fireTimer = CFG.rusherCooldown + Math.random() * 0.3;
     return;
   }
   if (e.burst <= 0) e.burst = CFG.enemyBurst;
   e.burst--;
-  e.fireTimer = e.burst > 0 ? CFG.enemyBurstGap : (dist < 13 ? 0.45 : CFG.enemyBurstDelay) + Math.random() * 0.5;
-  const lead = d3 / CFG.enemyBulletSpeed * 0.7;
-  const spread = (0.3 + d3 * 0.012) * (evasive ? CFG.enemySpreadVsWallRun : 1);
+  e.fireTimer = e.burst > 0 ? CFG.enemyBurstGap : (dist < 13 ? 0.35 : CFG.enemyBurstDelay) + Math.random() * 0.35;
+  const lead = d3 / CFG.enemyBulletSpeed * CFG.enemyLead;
+  const spread = (CFG.enemySpread + d3 * CFG.enemySpreadPerM) * (evasive ? CFG.enemySpreadVsWallRun : 1);
   const target = _aimPt.copy(P.pos).addScaledVector(P.vel, lead).addScaledVector(randUnit(_p), spread);
   const dir = target.sub(eye).normalize();
   spawnBullet('enemy', eye.clone().addScaledVector(dir, 0.8), dir);
