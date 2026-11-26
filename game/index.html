@@ -142,6 +142,7 @@ const CFG = {
   wallRunDecay: 3,                             // m/s lost per second on the wall: a wall run never speeds you up
   enemySpreadVsWallRun: 2.4,                   // enemies struggle to hit a wall-running / fast airborne player
   enemyReaction: 0.6,                          // seconds an enemy waits after coming on screen before firing
+  enemyMaxDrop: 7,                             // enemies posted this high or lower may decide to jump down to the floor
   bulletTimeScale: 0.25, focusMax: 100, focusDrain: 24, focusRegen: 12, focusRegenDelay: 1.0,
   mouseSens: 0.0022,
 };
@@ -197,15 +198,18 @@ function buildLevel() {
   ];
   for (const [x0, x1, z0, z1, h, t] of shell) addBox(x0, 0, z0, x1, h, z1, 'building', t);
 
-  // --- 1. Start roof (safe). The spire is straight ahead.
-  L.A = addBox(-8, 0, -12, 8, 6, 16, 'building', 0);
-  hint(-8, -12, 8, 16, 5, 'Hold <b>Shift</b> to run. Run along the <b>orange wall</b> on the left and jump at the edge to wall-run across.');
+  // --- 1. Start roof (safe). It spans wall to wall, so there is no way around the first gap. The spire is ahead.
+  L.A = addBox(-14, 0, -12, 14, 6, 24, 'building', 0);
+  hint(-14, -12, 14, 24, 5, 'Hold <b>Shift</b> to run. Run along the tall <b>orange wall</b> on the left and jump at the edge to wall-run across.');
 
-  // --- 2. Teach the wall run: 14 m gap, too far to jump, with a run wall on the left.
+  // --- 2. Teach the wall run: the only gap is a 4 m channel along the orange wall, 14 m long (too far to jump).
+  //        Everything to the right of it is a 12 m block you can't climb from the start roof.
   L.wr1 = addBox(-9.5, 0, -26, -8, 12, -12, 'route');
-  L.B = addBox(-8, 0, -50, 8, 6, -26, 'building', 1);
-  L.rec1 = block(6.5, -24.5, 3, 3, 3, 0, 'route');               // fell? climb this, then the roof
-  hint(-12, -12, 12, -26, -1, 'Fell? Climb the orange block, then jump into the wall to climb onto the roof.', 2.5);
+  L.wr1b = addBox(-4.5, 0, -26, -4, 12, -12, 'route');           // orange lining on the far side of the channel
+  L.fillR = addBox(-4, 0, -26, 14, 12, -12, 'building', 3);       // fills the right side of the gap
+  addBox(-14, 0, -26, -9.5, 12, -12, 'building', 3);              // and the strip left of the orange wall
+  L.B = addBox(-14, 0, -50, 14, 6, -26, 'building', 1);
+  hint(-8, -26, -4, -12, -1, 'Fell? Jump between the two <b>orange walls</b> to climb back out.', 2.5);
 
   // --- 3. Teach the wall-jump corridor: two orange walls 3.5 m apart on B's roof, running up to the taller C.
   //        Walk in, jump from wall to wall to climb, then jump into C's wall to get on top.
@@ -261,18 +265,21 @@ function buildLevel() {
 // Enemy posts: each enemy stands at (x, z) on top of `on` and stays inside that box's footprint (or `area`).
 // Placement is fixed, so every restart starts from the same layout.
 function enemySpawns() {
-  const on = (b, x, z, area) => ({ x, z, y: b.max.y, area: area || [b.min.x, b.max.x, b.min.z, b.max.z] });
+  const on = (b, x, z, area, drop) => ({ x, z, y: b.max.y, area: area || [b.min.x, b.max.x, b.min.z, b.max.z], drop });
+  // drop: which way the enemy steps off its post, and the floor area it then holds
+  const A1 = [-15.5, 15, -126, -84], A2 = [-14, 16, -240, -200];
   const ground = (x, z, area) => ({ x, z, y: 0, area });
   return [
     // Mostly on the floors and on mid-height ledges; only two on rooftops (a sniper over arena 1, and the finale).
     // Arena 1: three on the floor, two ledges, one roof
     ground(6, -100, [-3, 15, -120, -84]), ground(-1, -119, [-3, 14, -127, -108]), ground(11, -90, [-3, 15, -120, -84]),
-    on(L.LBledge, -14.5, -108), on(L.RBledge, 14.5, -100), on(L.RB, 23, -115),
+    on(L.LBledge, -14.5, -108, null, { dir: [1, 0], area: A1 }), on(L.RBledge, 14.5, -100, null, { dir: [-1, 0], area: A1 }),
+    on(L.RB, 23, -115, null, { dir: [-1, 0], area: A1 }),
     // Corridor section: one perch watching the corridor
     on(L.perch, 12.5, -162),
     // Arena 2: three on the floor, three ledges
     ground(6, -218, [-14, 16, -240, -200]), ground(-10, -232, [-14, 16, -240, -200]), ground(12, -206, [-14, 16, -240, -200]),
-    on(L.Fledge, -16.5, -224), on(L.Gledge, 16.5, -211), on(L.spireLedge, 7.5, -250),
+    on(L.Fledge, -16.5, -224), on(L.Gledge, 16.5, -211, null, { dir: [-1, 0], area: A2 }), on(L.spireLedge, 7.5, -250),
     // Finale: one on top of the spire
     on(L.spire, 0, -251),
   ];
@@ -637,7 +644,8 @@ function createEnemy(spec, i) {
     pos: new V3(spec.x, spec.y + 0.5, spec.z), vel: new V3(), half: { x: 0.5, y: 0.5, z: 0.5 }, grounded: true,
     hp: CFG.enemyHP, alive: true, bounds: [a[0] + m, a[1] - m, a[2] + m, a[3] - m],
     fireTimer: 2.0 + (i % 5) * 0.2, burst: 0, strafeDir: i % 2 ? 1 : -1, strafeTimer: 1 + (i % 3) * 0.6,   // 2 s grace period after (re)start
-    losTimer: (i % 4) * 0.05, los: false, seen: false, flash: 0, running: false,
+    losTimer: (i % 4) * 0.05, los: false, seen: false,
+    mode: 'post', drop: spec.drop && spec.y <= CFG.enemyMaxDrop ? spec.drop : null, postY: spec.y + 0.5, decideT: 1 + (i % 3) * 0.4, noLosT: 0, dropT: 0, flash: 0, running: false,
     bar, fill, ...parts,
   };
   e.mesh.position.copy(e.pos);
@@ -1046,7 +1054,25 @@ function updateEnemy(e, dt) {
   e.strafeTimer -= dt;
   if (e.strafeTimer <= 0) { e.strafeDir = Math.random() < 0.5 ? -1 : 1; e.strafeTimer = 1.4 + Math.random() * 2.2; }
 
-  if (P.alive) {
+  // Posted low enough? Every second or two, decide whether to hold the post or jump down to the floor:
+  //  - jump down to get away when the player has come up to their level and is close;
+  //  - jump down to hunt when they have lost sight of a player who is down on the floor;
+  //  - otherwise stay up, where the view is better.
+  if (e.drop && e.mode === 'post' && P.alive) {
+    e.noLosT = e.los ? 0 : e.noLosT + dt;
+    e.decideT -= dt;
+    if (e.decideT <= 0) {
+      e.decideT = 1.2 + Math.random() * 0.8;
+      const cornered = dist < 9 && Math.abs(P.pos.y - e.pos.y) < 2.5;
+      const hunt = !e.los && e.noLosT > 3 && P.pos.y - 0.5 < 1.5 && dist < 40;
+      if ((cornered && Math.random() < 0.8) || (hunt && Math.random() < 0.6)) { e.mode = 'dropping'; e.dropT = 0; e.burst = 0; }
+    }
+  }
+  if (e.mode === 'dropping') {
+    // step off the edge and fall to the floor below
+    e.dropT += dt;
+    mx = e.drop.dir[0]; mz = e.drop.dir[1]; speed = 5.5; e.running = true;
+  } else if (P.alive) {
     if (dist < 13) { mx = -nx; mz = -nz; speed = 9; e.running = true; }                         // run away
     else if (dist < 22) { mx = -nx * 0.5 + px * e.strafeDir; mz = -nz * 0.5 + pz * e.strafeDir; speed = 6; e.running = true; } // back off while strafing
     else { mx = nx * 0.6 + px * e.strafeDir * 0.8; mz = nz * 0.6 + pz * e.strafeDir * 0.8; speed = 4.5; e.running = false; } // push to the roof edge for a shot
@@ -1068,9 +1094,16 @@ function updateEnemy(e, dt) {
   const res = moveBody(e, dt, CFG.stepUp);
   e.grounded = res.grounded;
   if (res.hitX || res.hitZ) { e.strafeDir *= -1; e.strafeTimer = 1 + Math.random(); }
-  const b = e.bounds;
-  e.pos.x = Math.min(b[1], Math.max(b[0], e.pos.x));
-  e.pos.z = Math.min(b[3], Math.max(b[2], e.pos.z));
+  if (e.mode === 'dropping') {
+    if ((e.grounded && e.pos.y < e.postY - 1) || e.dropT > 3) {          // landed: hold the floor from now on
+      const a = e.drop.area, m = 0.65;
+      e.mode = 'ground'; e.bounds = [a[0] + m, a[1] - m, a[2] + m, a[3] - m];
+    }
+  } else {
+    const b = e.bounds;
+    e.pos.x = Math.min(b[1], Math.max(b[0], e.pos.x));
+    e.pos.z = Math.min(b[3], Math.max(b[2], e.pos.z));
+  }
 
   e.mesh.position.copy(e.pos);
   e.mesh.rotation.set(0, Math.atan2(-dx, -dz), 0);
@@ -1091,7 +1124,7 @@ function updateEnemy(e, dt) {
   }
   // Only enemies that are on screen may shoot. Coming into view, they take a moment to react.
   const onScreen = frustum.containsPoint(e.pos);
-  if (!e.los || !onScreen) { e.fireTimer = Math.max(e.fireTimer, 0.35); e.burst = 0; e.seen = false; return; }
+  if (!e.los || !onScreen || e.mode === 'dropping') { e.fireTimer = Math.max(e.fireTimer, 0.35); e.burst = 0; e.seen = false; return; }
   if (!e.seen) { e.seen = true; e.fireTimer = Math.max(e.fireTimer, CFG.enemyReaction); }
   e.fireTimer -= dt;
   if (e.fireTimer <= 0) {

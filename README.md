@@ -38,8 +38,9 @@ One critical path from the start roof to the red-tipped spire, built on a few le
 | Forgiving failure | Every gap drops to the ground floor with a climbable way back up |
 | Push-forward combat (Doom), kill-refilled bullet time (Max Payne 2) | Each kill gives +20 health and +35 bullet time |
 
-Sections: start roof → wall-run gap → wall-jump corridor → arena 1 (courtyard) → zig-zag wall-run corridor → arena 2 (spire plaza) → spire top.
+Sections: start roof → wall-run channel (the only way across; the right side is a 12 m block) → wall-jump corridor → arena 1 (courtyard) → zig-zag wall-run corridor → arena 2 (spire plaza) → spire top.
 
 - 14 enemies at fixed posts, mostly on the arena floors and mid-height ledges (only two on rooftops: one over arena 1 and the finale on the spire); they fire 3-round bursts, only when they are **on your screen** (with a short reaction delay), and are much less accurate against a wall-running player
+- Enemies posted 7 m up or lower decide every second or two whether to hold their post or jump down to the floor: they drop to escape when you reach their level up close, or to hunt you when they lose sight of you on the floor. Higher posts always stay
 - Guns have a limited range (player ~60 m, enemies 50 m); the crosshair shows "Out of range"
 - Tuning values (speeds, damage, ranges, rewards, bullet time) are in the `CFG` object at the top of the script
