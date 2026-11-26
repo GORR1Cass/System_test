@@ -36,13 +36,13 @@ One critical path from the start roof to the red-tipped spire, built on a few le
 | Combat arenas joined by traversal ("combat bowls", Gears of War / Ghostrunner) | Two arenas with enemies on floor, ledge and roof layers, hard-cornered cover, an overlook on entry, and a low (fight) and high (wall-run) route |
 | Landmark / "weenie" | The spire's red mast is visible from the start, framed by the first corridor |
 | Forgiving failure | Every gap drops to the ground floor with a climbable way back up |
-| Push-forward combat (Doom), kill-refilled bullet time (Max Payne 2) | Each kill gives +20 health and +35 bullet time |
+| Push-forward combat (Doom), kill-refilled bullet time (Max Payne 2) | Each kill gives +20 health and +35 bullet time; bullet time never refills on its own |
 
 Each section has its own look (sandstone old town, construction site, brick courtyard, slate industrial, glass plaza) and the sky shifts from hazy to deep blue toward the spire. The camera keeps to the open side in tight spaces and the player turns see-through if the camera gets very close.
 
 Sections: start roof → wall-run channel (the only way across; the right side is a 12 m block) → enclosed climbing well (four platforms, closed sides) → arena 1 (courtyard) → zig-zag wall-run corridor → arena 2 (spire plaza) → spire top.
 
-- 14 enemies of three types at fixed posts: **riflemen** (keep their distance, 3-round bursts), **snipers** (darker, long barrel; a laser tracks you for ~1 s, locks, then one heavy shot — move when it locks), **rushers** (smaller, brighter; charge in and fire a close-range spread). Enemies steer around walls and cover and recover if they get stuck. Mostly on the arena floors and mid-height ledges (only two on rooftops); they fire 3-round bursts, only when they are **on your screen** (with a short reaction delay), and are much less accurate against a wall-running player
+- 14 enemies of three types at fixed posts: **riflemen** (keep their distance, 3-round bursts), **snipers** (darker, long barrel; a laser tracks you for ~1 s, locks, then one heavy shot — move when it locks), **rushers** (smaller, brighter; charge in and fire a close-range spread). Enemies steer around walls and cover and recover if they get stuck. Mostly on the arena floors and mid-height ledges (only two on rooftops); riflemen and rushers only fire when they are **on your screen** (with a short reaction delay); snipers can fire from off screen, since their laser and a rising tone warn you and the shot can be dodged, and are much less accurate against a wall-running player
 - Enemies posted 7 m up or lower decide every second or two whether to hold their post or jump down to the floor: they drop to escape when you reach their level up close, or to hunt you when they lose sight of you on the floor. Higher posts always stay
 - Guns have a limited range (player ~60 m, enemies 50 m); the crosshair shows "Out of range"
 - Tuning values (speeds, damage, ranges, rewards, bullet time) are in the `CFG` object at the top of the script
