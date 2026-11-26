@@ -129,7 +129,7 @@ const CFG = {
   groundAccel: 85, airAccel: 20,
   jumpVel: 10, coyote: 0.1, jumpBuffer: 0.14,
   stepUp: 0.6,
-  wallRunTime: 1.25, wallRunMinSpeed: 3.5, wallRunGravity: 9, wallRunLiftMin: 2.5, wallRunLiftMax: 6,
+  wallRunTime: 1.25, wallRunMinSpeed: 3.5,      // a wall run holds you level: it never lifts you up
   wallClimbTime: 0.3, wallClimbSpeed: 7.5,
   wallJumpOut: 8.5, wallJumpUp: 9.8,           // neutral wall jump (holding along the wall, or no input)
   wallJumpUpOut: 2.5, wallJumpUpUp: 13,        // holding toward the wall: jump mostly up
@@ -211,12 +211,17 @@ function buildLevel() {
   L.B = addBox(-14, 0, -50, 14, 6, -26, 'building', 1);
   hint(-8, -26, -4, -12, -1, 'Fell? Jump between the two <b>orange walls</b> to climb back out.', 2.5);
 
-  // --- 3. Teach the wall-jump corridor: two orange walls 3.5 m apart on B's roof, running up to the taller C.
-  //        Walk in, jump from wall to wall to climb, then jump into C's wall to get on top.
-  L.c1l = addBox(-3.25, 6, -50, -1.75, 20, -38, 'route');
-  L.c1r = addBox(1.75, 6, -50, 3.25, 20, -38, 'route');
+  // --- 3. Teach climbing: an enclosed well of platforms on B's roof, leading up to the taller C.
+  // Enclosed climbing well on B: solid side walls, C's face at the back, open only at the front.
+  // Inside, four orange platforms zig-zag upward 2.5 m at a time: jump at the next one and pull yourself up.
+  addBox(-5.5, 6, -50, -4, 19, -36, 'wall');
+  addBox(4, 6, -50, 5.5, 19, -36, 'wall');
+  L.w1 = addBox(1.5, 6, -41.5, 4, 8.5, -38.5, 'route');            // right, 8.5
+  L.w2 = addBox(-4, 6, -44, -1.5, 11, -41, 'route');               // left, 11
+  L.w3 = addBox(1.5, 6, -46.5, 4, 13.5, -43.5, 'route');           // right, 13.5
+  L.w4 = addBox(-4, 6, -50, -1.5, 15, -46.5, 'route');             // left, 15, against C
   L.C = addBox(-8, 0, -80, 8, 16, -50, 'building', 2);
-  hint(-8, -50, 8, -34, 5, 'Walk between the <b>orange walls</b>. Jump while holding toward the opposite wall to leap across; keep going to climb. At the top, run into the building ahead and jump while holding toward it to pop up.');
+  hint(-5.5, -50, 5.5, -33, 5, 'Climb the <b>orange platforms</b>: run and jump at the next one, and you pull yourself up onto it. From the top one, jump onto the roof ahead.');
 
   // --- 4. Arena 1 (courtyard). Overlook from C. Low route: across the floor, up the shaft in front of D.
   //        High route: wall-run the left wall, hop two pillars, wall-run again onto D.
@@ -366,7 +371,7 @@ const windowTex = makeWindowTexture();
 const blobTex = makeBlobTexture();
 
 const BUILDING_TINTS = ['#ddd6ca', '#c8d0d8', '#d9cfc2', '#c2cbd3', '#d3d9d2'];
-const KIND_COLORS = { ground: '#7c857e', boundary: '#8a9097', route: '#e8913f', ledge: '#6f7780', cover: '#7f878f', pole: '#3b4148', asphalt: '#4a4f55', sidewalk: '#9da39f', paint: '#e9e6da' };
+const KIND_COLORS = { wall: '#a39d94', ground: '#7c857e', boundary: '#8a9097', route: '#e8913f', ledge: '#6f7780', cover: '#7f878f', pole: '#3b4148', asphalt: '#4a4f55', sidewalk: '#9da39f', paint: '#e9e6da' };
 
 // --- static geometry is merged into one mesh per material (a handful of draw calls for the whole city)
 const batches = new Map();
@@ -980,7 +985,7 @@ function updatePlayer(dt, rdt) {
       P.wallState = 'climb'; P.wallTimer = CFG.wallClimbTime; P.wallNormal = wall;
     } else if (along > CFG.wallRunMinSpeed && into > -0.4) {
       P.wallState = 'run'; P.wallTimer = CFG.wallRunTime; P.wallNormal = wall;
-      P.vel.y = Math.min(Math.max(P.vel.y, CFG.wallRunLiftMin), CFG.wallRunLiftMax);
+      P.vel.y = 0;                                  // level off: rising stops, falling is caught
     }
   }
   if (P.wallState !== 'none') {
@@ -1008,7 +1013,7 @@ function updatePlayer(dt, rdt) {
     if (s < CFG.wallRunMinSpeed) { P.lastWallNormal = n; P.wallState = 'none'; }   // too slow: slide off the wall
     P.vel.x = tx / len * s - n.x * 1.5;
     P.vel.z = tz / len * s - n.z * 1.5;
-    P.vel.y -= CFG.wallRunGravity * dt;
+    P.vel.y = 0;                                    // stay level for the whole run; never move up
   } else {
     const accel = (P.grounded ? CFG.groundAccel : CFG.airAccel) * dt;
     if (P.grounded || hasInput) {

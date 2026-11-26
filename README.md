@@ -21,7 +21,7 @@ Third-person parkour shooter prototype in plain HTML + JavaScript (Three.js from
 
 - **Mouse** aim · **Left click** shoot · **WASD** move · **Shift** run · **Space** jump / wall jump
 - **Right click** or **E** bullet time (slows player, enemies and bullets; drains the meter)
-- Run and jump along a wall to **wall run** (you keep the speed you arrive with and slowly lose it; too slow and you slide off), jump into a wall to **wall climb**, jump again to **wall jump**
+- Run and jump along a wall to **wall run** (it holds you level and never lifts you; you keep the speed you arrive with and slowly lose it; too slow and you slide off), jump into a wall to **wall climb**, jump again to **wall jump**
 - **Steer wall jumps** with the movement keys: hold toward the wall to jump up it, away from it to leap out, along it (or nothing) for a balanced jump. One wall jump per wall until you land or touch another wall
 - **R** restarts at any time
 
@@ -38,7 +38,7 @@ One critical path from the start roof to the red-tipped spire, built on a few le
 | Forgiving failure | Every gap drops to the ground floor with a climbable way back up |
 | Push-forward combat (Doom), kill-refilled bullet time (Max Payne 2) | Each kill gives +20 health and +35 bullet time |
 
-Sections: start roof → wall-run channel (the only way across; the right side is a 12 m block) → wall-jump corridor → arena 1 (courtyard) → zig-zag wall-run corridor → arena 2 (spire plaza) → spire top.
+Sections: start roof → wall-run channel (the only way across; the right side is a 12 m block) → enclosed climbing well (four platforms, closed sides) → arena 1 (courtyard) → zig-zag wall-run corridor → arena 2 (spire plaza) → spire top.
 
 - 14 enemies at fixed posts, mostly on the arena floors and mid-height ledges (only two on rooftops: one over arena 1 and the finale on the spire); they fire 3-round bursts, only when they are **on your screen** (with a short reaction delay), and are much less accurate against a wall-running player
 - Enemies posted 7 m up or lower decide every second or two whether to hold their post or jump down to the floor: they drop to escape when you reach their level up close, or to hunt you when they lose sight of you on the floor. Higher posts always stay
