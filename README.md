@@ -23,10 +23,10 @@ Third-person parkour shooter prototype in plain HTML + JavaScript (Three.js from
 - **Right click** or **E** bullet time (slows player, enemies and bullets; drains the meter)
 - Run and jump along a wall to **wall run** (it holds you level and never lifts you; you keep the speed you arrive with and slowly lose it; too slow and you slide off), jump into a wall to **wall climb**, jump again to **wall jump**
 - **Steer wall jumps** with the movement keys: hold toward the wall to jump up it, away from it to leap out, along it (or nothing) for a balanced jump. One wall jump per wall until you land or touch another wall
-- **Steer in the air** by holding a direction: your flight turns toward it (holding back brakes). Right after a wall jump the jump carries you for a quarter of a second first, and you never come out of a wall jump faster than you were running along the wall
+- **Steer in the air** by holding a direction, at all times (also right after a wall jump): your flight turns toward it and holding back brakes. To cross a shaft or corridor, hold toward the opposite wall. Steering after a wall jump can't build speed beyond a run
 - **R** restarts at any time · **M** turns sound on/off (all sounds are synthesized in the browser; they start after your first click)
 
-**Goal:** reach the top of the red-tipped spire. Fighting is optional (kills refill health and bullet time); clearing every enemy does not end the level. The top-right panel shows the distance to the spire.
+**Goal:** take down every enemy **and** stand on top of the red-tipped spire (either order). Reaching the spire with enemies left shows how many remain. The top-right panel shows the distance to the spire and the enemies left.
 
 ### Level design
 
