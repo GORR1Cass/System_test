@@ -129,7 +129,9 @@ const $ = (id) => document.getElementById(id);
 const CFG = {
   gravity: 28, maxFall: 32,
   walkSpeed: 7.5, runSpeed: 13,
-  groundAccel: 85, airAccel: 20,
+  groundAccel: 85, airAccel: 28,
+  airTurnRate: 5,                              // mid-air steering: how fast (rad/s) you can turn your flight toward the keys you hold
+  wallJumpCarry: 0.25,                         // seconds after a wall jump before steering kicks in (so the jump still carries you across)
   jumpVel: 10, coyote: 0.1, jumpBuffer: 0.14,
   stepUp: 0.6,
   wallRunTime: 1.25, wallRunMinSpeed: 3.5,      // a wall run holds you level: it never lifts you up
@@ -1174,7 +1176,7 @@ function updatePlayer(dt, rdt) {
   P.jumpBuf -= dt;
   P.coyote = P.grounded ? CFG.coyote : Math.max(0, P.coyote - dt);
   P.wallJumpLock -= dt;
-  if (P.grounded) { P.lastWallNormal = null; P.lastJumpWall = null; }
+  if (P.grounded) { P.lastWallNormal = null; P.lastJumpWall = null; P.airCap = 0; }
 
   const wall = P.grounded ? null : wallProbe(P, hasInput ? wish : null);
   const fresh = wall && (!P.lastWallNormal || wall.x * P.lastWallNormal.x + wall.z * P.lastWallNormal.z < 0.5);
@@ -1200,7 +1202,8 @@ function updatePlayer(dt, rdt) {
       P.lastJumpWall = { x: wall.x, z: wall.z };
       SFX.wallJump();
       P.lastWallNormal = { x: wall.x, z: wall.z };
-      P.wallState = 'none'; P.wallJumpLock = 0.18; P.jumpBuf = 0;
+      P.wallState = 'none'; P.wallJumpLock = 0.18; P.jumpBuf = 0; P.airCarry = CFG.wallJumpCarry;
+      P.airCap = Math.max(6, Math.hypot(ax, az));   // after the carry, flight speed can't exceed the speed you had along the wall
     }
   }
 
@@ -1248,11 +1251,32 @@ function updatePlayer(dt, rdt) {
       const tx = wish.x * speed, tz = wish.z * speed;
       if (P.grounded) { P.vel.x = moveToward(P.vel.x, tx, accel); P.vel.z = moveToward(P.vel.z, tz, accel); }
       else {
-        // Air control only adds speed along the input direction; it never cancels sideways momentum,
-        // so a wall jump still carries you across to the opposite wall while you hold forward.
+        // Mid-air control. Right after a wall jump the jump carries you for a moment; after that you can
+        // steer: your flight turns toward the keys you hold (keeping its speed), holding the opposite
+        // direction brakes, and you can always build speed in the held direction up to running speed.
+        if (P.airCarry > 0) P.airCarry -= dt;
+        else {
+          const hs = Math.hypot(P.vel.x, P.vel.z);
+          if (hs > 0.5) {
+            let d = Math.atan2(wish.x, wish.z) - Math.atan2(P.vel.x, P.vel.z);
+            d = Math.atan2(Math.sin(d), Math.cos(d));                     // wrap to [-pi, pi]
+            if (Math.abs(d) < 2.4) {
+              const turn = Math.max(-CFG.airTurnRate * dt, Math.min(CFG.airTurnRate * dt, d));
+              const c = Math.cos(turn), sn = Math.sin(turn), vx = P.vel.x, vz = P.vel.z;
+              P.vel.x = vx * c + vz * sn; P.vel.z = -vx * sn + vz * c;
+            } else {
+              const k = Math.max(0, hs - accel) / hs; P.vel.x *= k; P.vel.z *= k;   // pulling back: brake
+            }
+          }
+        }
         const along = P.vel.x * wish.x + P.vel.z * wish.z;
         const add = Math.min(accel, speed - along);
         if (add > 0) { P.vel.x += wish.x * add; P.vel.z += wish.z * add; }
+        if (P.airCap && P.airCarry <= 0) {
+          // steering can't turn a wall jump's sideways push into extra forward speed: chained wall runs never speed up
+          const h2 = Math.hypot(P.vel.x, P.vel.z);
+          if (h2 > P.airCap) { const k = Math.max(P.airCap, h2 - accel) / h2; P.vel.x *= k; P.vel.z *= k; }
+        }
       }
     }
     P.vel.y = Math.max(-CFG.maxFall, P.vel.y - CFG.gravity * dt);
@@ -1555,6 +1579,7 @@ const CONTROLS = `
     <div><span>Run</span><span class="key">Shift</span></div>
     <div><span>Jump</span><span class="key">Space</span></div>
     <div><span>Wall jump up / away</span><span>Space + toward / away from wall</span></div>
+    <div><span>Steer in the air</span><span>Hold a direction</span></div>
     <div><span>Bullet time</span><span><span class="key">Right click</span> or <span class="key">E</span></span></div>
     <div><span>Wall run</span><span>Run and jump along a wall</span></div>
     <div><span>Wall climb</span><span>Jump into a wall</span></div>
