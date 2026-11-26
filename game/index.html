@@ -105,7 +105,7 @@ body.slowmo #slow { opacity: 1; }
   <div class="bar thin"><div id="focusFill" class="fill focus"></div></div>
 </div>
 <div id="targets" class="panel"><span class="label">Enemies left</span><span id="enemyCount" class="num">0</span></div>
-<div id="hint" class="label"><span class="key">R</span> Restart</div>
+<div id="hint" class="label"><span class="key">R</span> Restart <span class="key">M</span> <span id="soundState">Sound on</span></div>
 <div id="crosshair"></div>
 <div id="rangeTag" hidden>Out of range</div>
 <div id="moveTag"></div>
@@ -142,11 +142,101 @@ const CFG = {
   wallRunDecay: 3,                             // m/s lost per second on the wall: a wall run never speeds you up
   enemySpreadVsWallRun: 2.4,                   // enemies struggle to hit a wall-running / fast airborne player
   enemyReaction: 0.6,                          // seconds an enemy waits after coming on screen before firing
+  sniperRange: 80, sniperCharge: 1.3, sniperLock: 0.3, sniperDamage: 28, sniperBulletSpeed: 95,
+  rusherRange: 14, rusherPellets: 4, rusherPelletDamage: 6,
   enemyMaxDrop: 7,                             // enemies posted this high or lower may decide to jump down to the floor
   bulletTimeScale: 0.25, focusMax: 100, focusDrain: 24, focusRegen: 12, focusRegenDelay: 1.0,
   mouseSens: 0.0022,
 };
 const REDUCED_MOTION = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ------------------------------------------------------------------ sound (synthesized with Web Audio, no files)
+// Starts on the first click or key press (browsers block audio before that). M toggles it.
+const SFX = (() => {
+  let ctx = null, master = null, lp = null, noiseBuf = null, muted = false, wallLoop = null;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  function init() {
+    if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try { ctx = new AC(); } catch (e) { ctx = null; return; }
+    lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 18000;
+    master = ctx.createGain(); master.gain.value = 0.55;
+    lp.connect(master); master.connect(ctx.destination);
+    noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  const on = () => ctx && !muted && ctx.state === 'running';
+  function bus(gain, pan) {
+    const g = ctx.createGain(); g.gain.value = 0;
+    if (pan && ctx.createStereoPanner) { const p = ctx.createStereoPanner(); p.pan.value = clamp(pan, -1, 1); g.connect(p); p.connect(lp); }
+    else g.connect(lp);
+    return g;
+  }
+  function noise(dur, o) {
+    const t = ctx.currentTime + (o.delay || 0), src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = bus(0, o.pan);
+    src.buffer = noiseBuf; f.type = o.type || 'bandpass'; f.frequency.value = o.freq; f.Q.value = o.q || 1;
+    if (o.to) f.frequency.exponentialRampToValueAtTime(o.to, t + dur);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(o.gain, t + (o.attack || 0.003)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(g); src.start(t, Math.random() * 0.5); src.stop(t + dur + 0.05);
+  }
+  function tone(dur, o) {
+    const t = ctx.currentTime + (o.delay || 0), osc = ctx.createOscillator(), g = bus(0, o.pan);
+    osc.type = o.type || 'sine'; osc.frequency.setValueAtTime(o.freq, t);
+    if (o.to) osc.frequency.exponentialRampToValueAtTime(o.to, t + dur);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(o.gain, t + (o.attack || 0.004)); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g); osc.start(t); osc.stop(t + dur + 0.05);
+  }
+  // distance falloff and stereo position relative to the camera
+  const _d = new THREE.Vector3(), _rr = new THREE.Vector3();
+  function place(pos, range = 70) {
+    _d.copy(pos).sub(camera.position); const dist = _d.length();
+    _rr.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    return { vol: clamp(1 - dist / range, 0, 1) ** 1.5, pan: dist > 0.01 ? _d.dot(_rr) / dist * 0.8 : 0 };
+  }
+  return {
+    init,
+    get muted() { return muted; },
+    toggle() { muted = !muted; if (master) master.gain.value = muted ? 0 : 0.55; if (muted) this.wallRun(false); return muted; },
+    shoot() { if (!on()) return; noise(0.11, { gain: 0.45, freq: 2200, q: 0.6, to: 500 }); tone(0.09, { gain: 0.3, freq: 170, to: 45, type: 'triangle' }); },
+    enemyShot(pos, kind) {
+      if (!on()) return; const { vol, pan } = place(pos); if (vol <= 0.01) return;
+      if (kind === 'sniper') { noise(0.35, { gain: 0.5 * vol, freq: 3000, q: 0.5, to: 300, pan }); tone(0.3, { gain: 0.25 * vol, freq: 120, to: 35, type: 'sawtooth', pan }); }
+      else if (kind === 'rusher') { noise(0.18, { gain: 0.5 * vol, freq: 900, q: 0.5, to: 200, pan }); tone(0.14, { gain: 0.3 * vol, freq: 90, to: 40, type: 'triangle', pan }); }
+      else { noise(0.1, { gain: 0.35 * vol, freq: 1400, q: 0.7, to: 400, pan }); tone(0.08, { gain: 0.18 * vol, freq: 140, to: 50, type: 'triangle', pan }); }
+    },
+    sniperCharge(pos, dur) { if (!on()) return; const { vol, pan } = place(pos, 90); if (vol <= 0.01) return; tone(dur, { gain: 0.07 * vol, freq: 500, to: 1600, type: 'sine', pan, attack: 0.05 }); },
+    impact(pos) { if (!on()) return; const { vol, pan } = place(pos, 40); if (vol <= 0.01) return; noise(0.05, { gain: 0.18 * vol, freq: 3500, q: 1.5, pan }); },
+    hit() { if (!on()) return; tone(0.08, { gain: 0.2, freq: 260, to: 120, type: 'square' }); noise(0.06, { gain: 0.15, freq: 700, q: 1 }); },
+    kill() { if (!on()) return; tone(0.4, { gain: 0.45, freq: 130, to: 40 }); tone(0.3, { gain: 0.1, freq: 880, to: 1320, type: 'triangle', delay: 0.05 }); noise(0.25, { gain: 0.2, freq: 500, q: 0.6, to: 150 }); },
+    hurt() { if (!on()) return; tone(0.22, { gain: 0.35, freq: 95, to: 45, type: 'sawtooth' }); noise(0.14, { gain: 0.2, freq: 450, q: 0.8 }); },
+    step(run) { if (!on()) return; noise(0.05, { gain: run ? 0.09 : 0.06, freq: 700 + Math.random() * 500, q: 1.2 }); },
+    jump() { if (!on()) return; noise(0.14, { gain: 0.08, freq: 600, to: 1800, type: 'highpass' }); },
+    wallJump() { if (!on()) return; noise(0.18, { gain: 0.14, freq: 500, to: 2400, q: 0.8 }); tone(0.1, { gain: 0.08, freq: 300, to: 600, type: 'triangle' }); },
+    land(strength) { if (!on()) return; const s = clamp(strength, 0, 1); tone(0.12, { gain: 0.15 + 0.25 * s, freq: 110, to: 50 }); noise(0.08, { gain: 0.08 + 0.12 * s, freq: 500, q: 0.7 }); },
+    wallRun(active) {
+      if (!ctx) return;
+      if (active && on() && !wallLoop) {
+        const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = bus(0);
+        src.buffer = noiseBuf; src.loop = true; f.type = 'bandpass'; f.frequency.value = 650; f.Q.value = 0.9;
+        g.gain.linearRampToValueAtTime(0.09, ctx.currentTime + 0.08);
+        src.connect(f); f.connect(g); src.start(); wallLoop = { src, g };
+      } else if (!active && wallLoop) {
+        const { src, g } = wallLoop; wallLoop = null;
+        g.gain.cancelScheduledValues(ctx.currentTime); g.gain.setValueAtTime(g.gain.value, ctx.currentTime);
+        g.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.12); src.stop(ctx.currentTime + 0.15);
+      }
+    },
+    slow(active) {
+      if (!ctx) return;
+      lp.frequency.cancelScheduledValues(ctx.currentTime); lp.frequency.setValueAtTime(lp.frequency.value, ctx.currentTime);
+      lp.frequency.exponentialRampToValueAtTime(active ? 900 : 18000, ctx.currentTime + 0.3);
+      if (on()) tone(0.5, { gain: 0.2, freq: active ? 320 : 80, to: active ? 70 : 320 });
+    },
+    heartbeat() { if (!on()) return; tone(0.13, { gain: 0.35, freq: 70, to: 40 }); tone(0.13, { gain: 0.25, freq: 65, to: 38, delay: 0.19 }); },
+  };
+})();
 
 // ------------------------------------------------------------------ level data
 // Everything is an axis-aligned box. Units are metres; a character cube is 1 m. Forward is -z.
@@ -187,28 +277,29 @@ function buildLevel() {
 
   // --- City shell: a canyon of buildings around the path (also blocks the sky-line edges)
   const shell = [
-    [-40, -14, 32, -5, 18, 0], [-40, -14, -5, -40, 26, 3], [-40, -14, -40, -80, 20, 1],
-    [14, 40, 32, -15, 24, 2], [14, 40, -15, -50, 16, 4], [14, 40, -50, -80, 28, 0],
-    [-40, -30, -80, -130, 30, 2], [30, 40, -80, -130, 30, 3],
-    [-40, -14, -130, -172, 24, 4], [14, 40, -130, -172, 20, 1],
-    [-40, -12, -172, -195, 26, 0], [12, 40, -172, -195, 22, 3],
-    [-40, -30, -195, -232, 34, 1], [30, 40, -195, -226, 30, 4],
-    [-40, -18, -232, -264, 28, 3], [18, 40, -226, -264, 24, 2],
-    [-40, 40, -264, -272, 40, 0], [-40, 40, 24, 32, 20, 4],
+    // each section has its own look: warm old town -> construction site -> brick courtyard -> slate industrial -> glass plaza
+    [-40, -14, 32, -5, 18, 'warm1'], [-40, -14, -5, -40, 26, 'warm2'], [-40, -14, -40, -80, 20, 'raw'],
+    [14, 40, 32, -15, 24, 'warm2'], [14, 40, -15, -50, 16, 'warm1'], [14, 40, -50, -80, 28, 'raw'],
+    [-40, -30, -80, -130, 30, 'brick1'], [30, 40, -80, -130, 30, 'brick2'],
+    [-40, -14, -130, -172, 24, 'slate1'], [14, 40, -130, -172, 20, 'slate0'],
+    [-40, -12, -172, -195, 26, 'slate0'], [12, 40, -172, -195, 22, 'slate1'],
+    [-40, -30, -195, -232, 34, 'glass1'], [30, 40, -195, -226, 30, 'glass0'],
+    [-40, -18, -232, -264, 28, 'marble'], [18, 40, -226, -264, 24, 'glass1'],
+    [-40, 40, -264, -272, 40, 'glass0'], [-40, 40, 24, 32, 20, 'warm1'],
   ];
   for (const [x0, x1, z0, z1, h, t] of shell) addBox(x0, 0, z0, x1, h, z1, 'building', t);
 
   // --- 1. Start roof (safe). It spans wall to wall, so there is no way around the first gap. The spire is ahead.
-  L.A = addBox(-14, 0, -12, 14, 6, 24, 'building', 0);
+  L.A = addBox(-14, 0, -12, 14, 6, 24, 'building', 'warm0');
   hint(-14, -12, 14, 24, 5, 'Hold <b>Shift</b> to run. Run along the tall <b>orange wall</b> on the left and jump at the edge to wall-run across.');
 
   // --- 2. Teach the wall run: the only gap is a 4 m channel along the orange wall, 14 m long (too far to jump).
   //        Everything to the right of it is a 12 m block you can't climb from the start roof.
   L.wr1 = addBox(-9.5, 0, -26, -8, 12, -12, 'route');
   L.wr1b = addBox(-4.5, 0, -26, -4, 12, -12, 'route');           // orange lining on the far side of the channel
-  L.fillR = addBox(-4, 0, -26, 14, 12, -12, 'building', 3);       // fills the right side of the gap
-  addBox(-14, 0, -26, -9.5, 12, -12, 'building', 3);              // and the strip left of the orange wall
-  L.B = addBox(-14, 0, -50, 14, 6, -26, 'building', 1);
+  L.fillR = addBox(-4, 0, -26, 14, 12, -12, 'building', 'warm2');       // fills the right side of the gap
+  addBox(-14, 0, -26, -9.5, 12, -12, 'building', 'warm2');              // and the strip left of the orange wall
+  L.B = addBox(-14, 0, -50, 14, 6, -26, 'building', 'warm1');
   hint(-8, -26, -4, -12, -1, 'Fell? Jump between the two <b>orange walls</b> to climb back out.', 2.5);
 
   // --- 3. Teach climbing: an enclosed well of platforms on B's roof, leading up to the taller C.
@@ -220,21 +311,22 @@ function buildLevel() {
   L.w2 = addBox(-4, 6, -44, -1.5, 11, -41, 'route');               // left, 11
   L.w3 = addBox(1.5, 6, -46.5, 4, 13.5, -43.5, 'route');           // right, 13.5
   L.w4 = addBox(-4, 6, -50, -1.5, 15, -46.5, 'route');             // left, 15, against C
-  L.C = addBox(-8, 0, -80, 8, 16, -50, 'building', 2);
+  L.C = addBox(-8, 0, -80, 8, 16, -50, 'building', 'raw');
   hint(-5.5, -50, 5.5, -33, 5, 'Climb the <b>orange platforms</b>: run and jump at the next one, and you pull yourself up onto it. From the top one, jump onto the roof ahead.');
 
   // --- 4. Arena 1 (courtyard). Overlook from C. Low route: across the floor, up the shaft in front of D.
   //        High route: wall-run the left wall, hop two pillars, wall-run again onto D.
   hint(-8, -80, 8, -66, 15, 'Two ways on: fight across the courtyard floor, or stay high: wall-run the <b>orange walls</b> on the left and hop the pillars.');
-  L.LB = addBox(-30, 0, -128, -16, 9, -80, 'building', 4);
-  L.RB = addBox(16, 0, -128, 30, 7, -80, 'building', 0);
+  L.LB = addBox(-30, 0, -128, -16, 9, -80, 'building', 'brick0');
+  addBox(-16, 0, -128, 16, 0.02, -80, 'tiles', 0, deco);            // courtyard paving
+  L.RB = addBox(16, 0, -128, 30, 7, -80, 'building', 'brick1');
   L.RBledge = addBox(13, 3.4, -105, 16, 4, -95, 'ledge');
   L.LBledge = addBox(-16, 4.4, -112, -13, 5, -104, 'ledge');       // mid layer on the left (climbable from the floor)
   L.wr2 = addBox(-9.5, 0, -96, -8, 21, -80, 'route');
   L.P1 = addBox(-8, 0, -106, -4, 15, -96, 'route');
   L.P2 = addBox(-8, 0, -119, -4, 14, -111, 'route');
   L.wr3 = addBox(-9.5, 0, -126, -8, 20, -119, 'route');
-  L.D = addBox(-10, 0, -150, 10, 12, -128, 'building', 3);
+  L.D = addBox(-10, 0, -150, 10, 12, -128, 'building', 'brick2');
   L.shaft1 = addBox(-10, 0, -125, -3, 13.5, -124.5, 'route');      // 3 m shaft in front of D
   [[-4, -90, 3, 3, 6], [9, -104, 3, 3, 6], [3, -116, 3, 3, 5]].forEach(([x, z, w, d, h]) => block(x, z, w, d, h, 0, 'cover'));
   [[4, -86, 6, 1, 1.3], [12, -112, 1, 6, 1.3], [7, -123, 5, 1, 1.3], [-1, -102, 1, 5, 1.3]].forEach(([x, z, w, d, h]) => block(x, z, w, d, h, 0, 'cover'));
@@ -243,17 +335,18 @@ function buildLevel() {
   // --- 5. Combine: wall-run corridor. Two walls 3.5 m apart; jump from wall to wall to gain height onto E.
   L.cl = addBox(-3.25, 0, -172, -1.75, 22, -150, 'route');
   L.cr = addBox(1.75, 0, -172, 3.25, 22, -150, 'route');
-  L.E = addBox(-10, 0, -195, 10, 18, -172, 'building', 4);
+  L.E = addBox(-10, 0, -195, 10, 18, -172, 'building', 'slate0');
   L.perch = addBox(11, 14.4, -166, 14, 15, -158, 'ledge');
   hint(-10, -150, 10, -136, 11, 'Run into the corridor along one wall, then keep jumping from wall to wall. Each jump gains height.');
 
   // --- 6. Arena 2 (spire plaza). Overlook from E; enemies on the towers, a ledge, the floor and the spire top.
-  L.F = addBox(-30, 0, -232, -18, 22, -200, 'building', 2);
+  L.F = addBox(-30, 0, -232, -18, 22, -200, 'building', 'glass0');
+  addBox(-18, 0, -245, 18, 0.02, -195, 'plaza', 0, deco);           // plaza stone
   L.Fledge = addBox(-18, 9.4, -228, -15, 10, -220, 'ledge');
   L.Gledge = addBox(15, 5.4, -215, 18, 6, -207, 'ledge');
   L.spireLedge = addBox(6, 15.4, -253, 9, 16, -247, 'ledge');     // covers the spire shaft from the side
-  L.G = addBox(18, 0, -226, 30, 14, -198, 'building', 1);
-  L.spire = addBox(-6, 0, -257, 6, 34, -245, 'building', 0);
+  L.G = addBox(18, 0, -226, 30, 14, -198, 'building', 'glass1');
+  L.spire = addBox(-6, 0, -257, 6, 34, -245, 'building', 'spire');
   L.shaft2 = addBox(-6, 0, -242, 0, 35.5, -241.5, 'route');        // 3 m shaft up the spire
   addBox(-6, 34, -257, -3.5, 66, -254.5, 'beacon');              // landmark mast, framed by the first corridor from the start
   [[-8, -210, 3, 3, 6], [10, -222, 3, 3, 6], [3, -232, 3, 3, 5]].forEach(([x, z, w, d, h]) => block(x, z, w, d, h, 0, 'cover'));
@@ -261,32 +354,33 @@ function buildLevel() {
   hint(-10, -195, 10, -181, 17, 'The spire: climb the shaft on its front face to reach the top.');
 
   // Skyline beyond the shell (visual)
-  const sky = [[-55, 0, 14, 30, 50, 1], [-58, -70, 16, 40, 64, 3], [-54, -150, 12, 50, 46, 0], [-60, -230, 18, 40, 70, 2],
-               [55, 10, 14, 30, 44, 4], [58, -90, 16, 40, 60, 2], [55, -170, 12, 40, 52, 1], [60, -240, 18, 40, 66, 3],
-               [-15, -290, 24, 14, 74, 1], [18, -292, 20, 16, 58, 4], [0, 48, 40, 12, 40, 2]];
+  const sky = [[-55, 0, 14, 30, 50, 'warm1'], [-58, -70, 16, 40, 64, 'raw'], [-54, -150, 12, 50, 46, 'slate1'], [-60, -230, 18, 40, 70, 'glass0'],
+               [55, 10, 14, 30, 44, 'warm2'], [58, -90, 16, 40, 60, 'brick1'], [55, -170, 12, 40, 52, 'slate0'], [60, -240, 18, 40, 66, 'glass1'],
+               [-15, -290, 24, 14, 74, 'glass1'], [18, -292, 20, 16, 58, 'spire'], [0, 48, 40, 12, 40, 'warm2']];
   for (const [x, z, w, d, h, t] of sky) block(x, z, w, d, h, 0, 'building', t, deco);
 }
 
 // Enemy posts: each enemy stands at (x, z) on top of `on` and stays inside that box's footprint (or `area`).
 // Placement is fixed, so every restart starts from the same layout.
 function enemySpawns() {
-  const on = (b, x, z, area, drop) => ({ x, z, y: b.max.y, area: area || [b.min.x, b.max.x, b.min.z, b.max.z], drop });
-  // drop: which way the enemy steps off its post, and the floor area it then holds
+  const on = (b, x, z, area, drop, type) => ({ x, z, y: b.max.y, area: area || [b.min.x, b.max.x, b.min.z, b.max.z], drop, type });
+  const ground = (x, z, area, type) => ({ x, z, y: 0, area, type });
+  // drop: which way a rifleman steps off a low post, and the floor area it then holds
   const A1 = [-15.5, 15, -126, -84], A2 = [-14, 16, -240, -200];
-  const ground = (x, z, area) => ({ x, z, y: 0, area });
   return [
     // Mostly on the floors and on mid-height ledges; only two on rooftops (a sniper over arena 1, and the finale).
-    // Arena 1: three on the floor, two ledges, one roof
-    ground(6, -100, [-3, 15, -120, -84]), ground(-1, -119, [-3, 14, -127, -108]), ground(11, -90, [-3, 15, -120, -84]),
-    on(L.LBledge, -14.5, -108, null, { dir: [1, 0], area: A1 }), on(L.RBledge, 14.5, -100, null, { dir: [-1, 0], area: A1 }),
-    on(L.RB, 23, -115, null, { dir: [-1, 0], area: A1 }),
-    // Corridor section: one perch watching the corridor
-    on(L.perch, 12.5, -162),
-    // Arena 2: three on the floor, three ledges
-    ground(6, -218, [-14, 16, -240, -200]), ground(-10, -232, [-14, 16, -240, -200]), ground(12, -206, [-14, 16, -240, -200]),
-    on(L.Fledge, -16.5, -224), on(L.Gledge, 16.5, -211, null, { dir: [-1, 0], area: A2 }), on(L.spireLedge, 7.5, -250),
+    // Arena 1: a rusher and two riflemen on the floor, riflemen on the two ledges, a sniper on the right roof
+    ground(11, -90, A1, 'rusher'), ground(6, -100, [-3, 15, -120, -84], 'rifle'), ground(-1, -119, [-3, 14, -127, -108], 'rifle'),
+    on(L.LBledge, -14.5, -108, null, { dir: [1, 0], area: A1 }, 'rifle'), on(L.RBledge, 14.5, -100, null, { dir: [-1, 0], area: A1 }, 'rifle'),
+    on(L.RB, 23, -115, null, null, 'sniper'),
+    // Corridor section: a sniper on the perch watching the corridor
+    on(L.perch, 12.5, -162, null, null, 'sniper'),
+    // Arena 2: two rushers and a rifleman on the floor, snipers high, a rifleman on the low ledge
+    ground(6, -218, A2, 'rusher'), ground(-10, -232, A2, 'rifle'), ground(12, -206, A2, 'rusher'),
+    on(L.Fledge, -16.5, -224, null, null, 'sniper'), on(L.Gledge, 16.5, -211, null, { dir: [-1, 0], area: A2 }, 'rifle'),
+    on(L.spireLedge, 7.5, -250, null, null, 'sniper'),
     // Finale: one on top of the spire
-    on(L.spire, 0, -251),
+    on(L.spire, 0, -251, null, null, 'rifle'),
   ];
 }
 const PLAYER_SPAWN = { x: 0, y: 6.5, z: 10 };
@@ -324,6 +418,16 @@ const canvas = renderer.domElement;
 const scene = new THREE.Scene();
 const SKY = 0xa9c7dc;
 scene.background = new THREE.Color(SKY);
+// The sky shifts as you go: hazy warm morning at the start, clear blue mid-level, deeper blue at the spire.
+const SKY_STOPS = [[20, new THREE.Color('#cfd8de')], [-100, new THREE.Color('#a9c7dc')], [-250, new THREE.Color('#8daed6')]];
+function updateSky(z) {
+  let c = SKY_STOPS[0][1];
+  for (let i = 0; i < SKY_STOPS.length - 1; i++) {
+    const [z0, c0] = SKY_STOPS[i], [z1, c1] = SKY_STOPS[i + 1];
+    if (z <= z0 && z >= z1) { scene.background.copy(c0).lerp(c1, (z0 - z) / (z0 - z1)); scene.fog.color.copy(scene.background); return; }
+  }
+  scene.background.copy(z > SKY_STOPS[0][0] ? SKY_STOPS[0][1] : SKY_STOPS[SKY_STOPS.length - 1][1]); scene.fog.color.copy(scene.background);
+}
 scene.fog = new THREE.Fog(SKY, 90, 340);
 
 const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 420);
@@ -367,11 +471,69 @@ function makeBlobTexture() {
   }
   return new THREE.CanvasTexture(c);
 }
+
+function canvasTex(draw) {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  draw(c.getContext('2d'));
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  return tex;
+}
+function glassGrad(g, y0, y1) { const grd = g.createLinearGradient(0, y0, 0, y1); grd.addColorStop(0, '#8aa0b3'); grd.addColorStop(1, '#46566a'); return grd; }
+// brick courses with a framed window per storey
+function makeBrickTexture() {
+  return canvasTex((g) => {
+    g.fillStyle = '#f4efe9'; g.fillRect(0, 0, 128, 128);
+    g.fillStyle = '#d9cfc4';
+    for (let y = 0; y < 128; y += 8) { g.fillRect(0, y, 128, 1); for (let x = (y / 8) % 2 ? 8 : 0; x < 128; x += 16) g.fillRect(x, y, 1, 8); }
+    g.fillStyle = '#efe8df'; g.fillRect(34, 28, 60, 70);
+    g.fillStyle = glassGrad(g, 32, 94); g.fillRect(38, 32, 52, 62);
+    g.fillStyle = '#efe8df'; g.fillRect(62, 32, 4, 62); g.fillRect(30, 98, 68, 5);
+  });
+}
+// curtain wall: full-height glass with mullions and a slab line per storey
+function makeGlassTexture() {
+  return canvasTex((g) => {
+    const grd = g.createLinearGradient(0, 0, 128, 128); grd.addColorStop(0, '#b7c9d8'); grd.addColorStop(0.5, '#8299ad'); grd.addColorStop(1, '#5d7186');
+    g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+    g.fillStyle = 'rgba(255,255,255,.18)'; g.beginPath(); g.moveTo(10, 128); g.lineTo(40, 0); g.lineTo(58, 0); g.lineTo(28, 128); g.fill();
+    g.fillStyle = '#eef2f4'; g.fillRect(0, 0, 3, 128); g.fillRect(62, 0, 3, 128); g.fillRect(0, 118, 128, 10);
+  });
+}
+// construction site: unfinished floors (dark openings) between slabs and columns
+function makeRawTexture() {
+  return canvasTex((g) => {
+    g.fillStyle = '#f0efec'; g.fillRect(0, 0, 128, 128);
+    g.fillStyle = '#3d4247'; g.fillRect(10, 22, 108, 90);
+    g.fillStyle = '#e4e2de'; g.fillRect(58, 22, 12, 90);
+    g.fillStyle = '#d8d6d1'; g.fillRect(0, 112, 128, 16);
+    g.fillStyle = 'rgba(255,200,80,.55)'; g.fillRect(10, 52, 48, 3); g.fillRect(70, 52, 48, 3);   // safety rail
+  });
+}
+// industrial: ribbon windows and panel seams
+function makeRibbonTexture() {
+  return canvasTex((g) => {
+    g.fillStyle = '#f1f2f3'; g.fillRect(0, 0, 128, 128);
+    g.fillStyle = '#dadde0'; for (let x = 0; x < 128; x += 32) g.fillRect(x, 0, 2, 128);
+    g.fillStyle = glassGrad(g, 40, 76); g.fillRect(0, 40, 128, 36);
+    g.fillStyle = '#e8eaec'; for (let x = 16; x < 128; x += 32) g.fillRect(x, 40, 3, 36);
+  });
+}
 const windowTex = makeWindowTexture();
 const blobTex = makeBlobTexture();
 
-const BUILDING_TINTS = ['#ddd6ca', '#c8d0d8', '#d9cfc2', '#c2cbd3', '#d3d9d2'];
-const KIND_COLORS = { wall: '#a39d94', ground: '#7c857e', boundary: '#8a9097', route: '#e8913f', ledge: '#6f7780', cover: '#7f878f', pole: '#3b4148', asphalt: '#4a4f55', sidewalk: '#9da39f', paint: '#e9e6da' };
+// Building looks: a texture (one tile per 3 m storey) tinted by a colour. Roofs use a darker shade of the colour.
+const TEX = { window: windowTex, brick: makeBrickTexture(), glass: makeGlassTexture(), raw: makeRawTexture(), ribbon: makeRibbonTexture() };
+const STYLES = {
+  warm0: { tex: 'window', color: '#e8d8c0' }, warm1: { tex: 'window', color: '#dcc8ab' }, warm2: { tex: 'window', color: '#d1bea3' },
+  raw: { tex: 'raw', color: '#c8c5bf' },
+  brick0: { tex: 'brick', color: '#b5603f', roof: '#5f544f' }, brick1: { tex: 'brick', color: '#9f4f37', roof: '#57504c' }, brick2: { tex: 'brick', color: '#bd7150', roof: '#645852' },   // grey roofs: orange stays reserved for the route
+  slate0: { tex: 'ribbon', color: '#8c99a6' }, slate1: { tex: 'ribbon', color: '#7b8895' },
+  glass0: { tex: 'glass', color: '#d8e8f1' }, glass1: { tex: 'glass', color: '#c5dae8' }, marble: { tex: 'window', color: '#eeece6' },
+  spire: { tex: 'glass', color: '#56708c' },
+};
+const KIND_COLORS = { tiles: '#7d6e68', plaza: '#cfcbc1', wall: '#56616c', ground: '#7c857e', boundary: '#8a9097', route: '#e8913f', ledge: '#6f7780', cover: '#7f878f', pole: '#3b4148', asphalt: '#4a4f55', sidewalk: '#9da39f', paint: '#e9e6da' };
 
 // --- static geometry is merged into one mesh per material (a handful of draw calls for the whole city)
 const batches = new Map();
@@ -383,9 +545,10 @@ function batch(key, makeMat) {
 function materialKeyFor(b, face) {
   if (b.kind === 'building') {
     const roof = face === 2 || face === 3;
+    const st = STYLES[b.tint] || STYLES.warm0;
     return roof
-      ? batch('roof' + b.tint, () => new THREE.MeshLambertMaterial({ color: new THREE.Color(BUILDING_TINTS[b.tint]).multiplyScalar(0.66) }))
-      : batch('side' + b.tint, () => new THREE.MeshLambertMaterial({ color: BUILDING_TINTS[b.tint], map: windowTex }));
+      ? batch('roof' + b.tint, () => new THREE.MeshLambertMaterial({ color: st.roof ? new THREE.Color(st.roof) : new THREE.Color(st.color).multiplyScalar(0.62) }))
+      : batch('side' + b.tint, () => new THREE.MeshLambertMaterial({ color: st.color, map: TEX[st.tex] }));
   }
   if (b.kind === 'beacon') return batch('beacon', () => new THREE.MeshBasicMaterial({ color: 0xff3b30, fog: false }));
   return batch(b.kind, () => new THREE.MeshLambertMaterial({ color: KIND_COLORS[b.kind] || '#999' }));
@@ -479,6 +642,15 @@ const pBulletPool = pool(new THREE.BoxGeometry(0.07, 0.07, 1.4), new THREE.MeshB
 const eBulletPool = pool(new THREE.BoxGeometry(0.16, 0.16, 1.0), new THREE.MeshBasicMaterial({ color: 0xff5a1f }), MAX.eBullets);
 const bloodPool = pool(unitBox, new THREE.MeshBasicMaterial({ color: 0xa00812 }), MAX.blood);
 const sparkPool = pool(unitBox, new THREE.MeshBasicMaterial({ color: 0xffd38a }), MAX.sparks);
+const trailPool = pool(unitBox, new THREE.MeshBasicMaterial({ color: 0x6fb0ff, transparent: true, opacity: 0.28, depthWrite: false }), 40);
+const trails = [];
+function addTrail(pos) { if (trails.length >= 40) trails.shift(); trails.push({ x: pos.x, y: pos.y, z: pos.z, life: 0.32 }); }
+function updateTrails(rdt) {
+  let n = 0;
+  for (let i = trails.length - 1; i >= 0; i--) { trails[i].life -= rdt; if (trails[i].life <= 0) trails.splice(i, 1); }
+  for (const t of trails) { const k = 0.95 * t.life / 0.32; _m.makeScale(k, k, k).setPosition(t.x, t.y, t.z); trailPool.setMatrixAt(n++, _m); }
+  trailPool.count = n; trailPool.instanceMatrix.needsUpdate = true;
+}
 const decalMat = (color, opacity) => new THREE.MeshLambertMaterial({ map: blobTex, color, transparent: true, opacity, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
 const decalRings = {
   blood: { mesh: pool(decalGeo, decalMat(0x6e0a0a, 1), MAX.bloodDecals), next: 0, n: 0, max: MAX.bloodDecals },
@@ -625,7 +797,7 @@ const keys = {};
 let firing = false, jumpQueued = false;
 let yaw = 0, pitch = -0.05;
 let bulletTime = false, timeScale = 1, focus = CFG.focusMax, focusDelay = 0;
-let hurt = 0, shake = 0, camRoll = 0, camPivotY = PLAYER_SPAWN.y;
+let hurt = 0, shake = 0, camRoll = 0, camPivotY = PLAYER_SPAWN.y, hitStop = 0, heartT = 0;
 let elapsed = 0, winTimer = -1, hitmarkT = 0, shotsFired = 0, shotsHit = 0;
 
 const player = {
@@ -634,27 +806,47 @@ const player = {
   wallState: 'none', wallTimer: 0, wallNormal: null, lastWallNormal: null, wallJumpLock: 0,
   fireCd: 0, flash: 0, ...makeCube(0x3f8cff),
 };
+player.mat.transparent = true;
 let enemies = [];
 const bullets = [], blood = [], sparks = [], chunks = [];
 
+// Enemy types. All red cubes, told apart by shade, size and gun:
+//  rifle  - keeps its distance and fires 3-round bursts (may jump down from low posts)
+//  sniper - darker, long barrel; holds a high post, shows a laser for a second, then fires one heavy shot
+//  rusher - smaller and brighter; charges you and fires a close-range spread
+const ENEMY_TYPES = {
+  rifle:  { color: 0xe23b3b, size: 1,    hp: 75, gunLen: 1 },
+  sniper: { color: 0x7a1f2b, size: 1,    hp: 60, gunLen: 1.9 },
+  rusher: { color: 0xff3d63, size: 0.75, hp: 50, gunLen: 0.7 },
+};
+const laserGeo = new THREE.BoxGeometry(0.035, 0.035, 1); laserGeo.translate(0, 0, 0.5);
+const laserMat = new THREE.MeshBasicMaterial({ color: 0xff2020, transparent: true, opacity: 0.6, depthWrite: false });
 function createEnemy(spec, i) {
-  const parts = makeCube(0xe23b3b);
+  const type = spec.type || 'rifle', T = ENEMY_TYPES[type];
+  const parts = makeCube(T.color);
+  parts.gun.scale.z = T.gunLen;
   const bar = new THREE.Group();
   const bg = new THREE.Mesh(barBgGeo, barBgMat);
   const fill = new THREE.Mesh(barFillGeo, barFillMat); fill.position.set(-0.57, 0, 0.002);
   bg.renderOrder = 10; fill.renderOrder = 11;
   bar.add(bg, fill); scene.add(bar);
-  const m = 0.65, a = spec.area;
+  const m = 0.65, a = spec.area, h = 0.5 * T.size;
   const e = {
-    pos: new V3(spec.x, spec.y + 0.5, spec.z), vel: new V3(), half: { x: 0.5, y: 0.5, z: 0.5 }, grounded: true,
-    hp: CFG.enemyHP, alive: true, bounds: [a[0] + m, a[1] - m, a[2] + m, a[3] - m],
+    type, size: T.size, maxHp: T.hp,
+    pos: new V3(spec.x, spec.y + h, spec.z), vel: new V3(), half: { x: h, y: h, z: h }, grounded: true,
+    hp: T.hp, alive: true, bounds: [a[0] + m, a[1] - m, a[2] + m, a[3] - m],
     fireTimer: 2.0 + (i % 5) * 0.2, burst: 0, strafeDir: i % 2 ? 1 : -1, strafeTimer: 1 + (i % 3) * 0.6,   // 2 s grace period after (re)start
     losTimer: (i % 4) * 0.05, los: false, seen: false,
-    mode: 'post', drop: spec.drop && spec.y <= CFG.enemyMaxDrop ? spec.drop : null, postY: spec.y + 0.5, decideT: 1 + (i % 3) * 0.4, noLosT: 0, dropT: 0, flash: 0, running: false,
+    mode: 'post', drop: type === 'rifle' && spec.drop && spec.y <= CFG.enemyMaxDrop ? spec.drop : null, postY: spec.y + h,
+    decideT: 1 + (i % 3) * 0.4, noLosT: 0, dropT: 0, flash: 0, running: false,
+    steerSide: i % 2 ? 1 : -1, steerT: 0, stuckT: 0.8, stuckFrom: new V3(spec.x, 0, spec.z), unstuckT: 0, unstuckX: 0, unstuckZ: 0,
+    charge: 0, aimLock: new V3(), laser: null,
     bar, fill, ...parts,
   };
+  e.mesh.scale.setScalar(T.size);
   e.mesh.position.copy(e.pos);
-  e.bar.position.set(e.pos.x, e.pos.y + 1, e.pos.z);
+  e.bar.position.set(e.pos.x, e.pos.y + 0.5 + h, e.pos.z);
+  if (type === 'sniper') { e.laser = new THREE.Mesh(laserGeo, laserMat); e.laser.visible = false; e.laser.renderOrder = 3; scene.add(e.laser); }
   return e;
 }
 
@@ -662,12 +854,13 @@ function clearDynamic() {
   bullets.length = 0; blood.length = 0; sparks.length = 0;
   for (const r of Object.values(decalRings)) { r.n = 0; r.next = 0; r.mesh.count = 0; }
   for (const c of chunks) scene.remove(c.mesh); chunks.length = 0;
-  for (const e of enemies) { scene.remove(e.mesh); scene.remove(e.bar); e.mat.dispose(); }
+  for (const e of enemies) { scene.remove(e.mesh); scene.remove(e.bar); if (e.laser) scene.remove(e.laser); e.mat.dispose(); }
   enemies = [];
 }
 
 function restart() {
   clearDynamic();
+  SFX.wallRun(false); trails.length = 0; hitStop = 0;
   enemies = enemySpawns().map(createEnemy);
   Object.assign(player, { hp: CFG.playerHP, alive: true, grounded: false, coyote: 0, jumpBuf: 0, wallState: 'none', wallTimer: 0, wallNormal: null, lastWallNormal: null, lastJumpWall: null, wallJumpLock: 0, fireCd: 0, flash: 0 });
   player.pos.set(PLAYER_SPAWN.x, PLAYER_SPAWN.y, PLAYER_SPAWN.z);
@@ -727,12 +920,14 @@ function collapse(body, mat, impulse) {
 }
 
 // ------------------------------------------------------------------ combat
-function spawnBullet(owner, origin, dir) {
+function spawnBullet(owner, origin, dir, o = {}) {
   const isP = owner === 'player';
   const list = bullets.filter((b) => b.owner === owner);
   if (list.length >= (isP ? MAX.pBullets : MAX.eBullets)) bullets.splice(bullets.indexOf(list[0]), 1);
-  bullets.push({ owner, pos: origin.clone(), dir: dir.clone(), speed: isP ? CFG.playerBulletSpeed : CFG.enemyBulletSpeed,
-    remain: isP ? CFG.playerRange : CFG.enemyBulletRange, len: isP ? 1.4 : 1.0, traveled: 0 });
+  bullets.push({ owner, pos: origin.clone(), dir: dir.clone(),
+    speed: o.speed || (isP ? CFG.playerBulletSpeed : CFG.enemyBulletSpeed),
+    damage: o.damage || (isP ? CFG.playerDamage : CFG.enemyDamage),
+    remain: o.range || (isP ? CFG.playerRange : CFG.enemyBulletRange), len: isP ? 1.4 : 1.0, traveled: 0 });
 }
 
 function lookDir(out = new V3()) { return out.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)); }
@@ -761,21 +956,27 @@ function playerShoot() {
   spawnBullet('player', origin, dir);
   muzzle.position.copy(origin).addScaledVector(dir, 0.85);
   muzzle.visible = true; muzzle.userData.t = 0.045;
+  SFX.shoot();
   shotsFired++;
 }
 
 function damageEnemy(e, dmg, point, dir) {
   if (!e.alive) return;
   e.hp -= dmg; e.flash = 1; shotsHit++;
+  e.flinch = 1; e.flinchSide = Math.random() < 0.5 ? -1 : 1;              // squash and jolt
+  e.vel.x += dir.x * 3; e.vel.z += dir.z * 3;                             // small knockback
+  SFX.hit();
   hitmarkT = 0.12;
   bloodBurst(point, dir, 14);
   e.strafeDir *= -1; e.strafeTimer = 0.8;
   if (e.hp <= 0) {
     e.alive = false;
-    scene.remove(e.mesh); scene.remove(e.bar);
+    scene.remove(e.mesh); scene.remove(e.bar); if (e.laser) scene.remove(e.laser);
     collapse(e, chunkMats.enemy, dir);
     bloodBurst(e.pos.clone(), dir, 34, 1.2);
     rewardKill();
+    SFX.kill();
+    hitStop = 0.07;                                                         // brief freeze-frame on a kill
     if (enemies.every((x) => !x.alive)) winTimer = 1.4;
   }
 }
@@ -792,6 +993,7 @@ function rewardKill() {
 function damagePlayer(dmg, point, dir) {
   if (!player.alive) return;
   player.hp = Math.max(0, player.hp - dmg);
+  SFX.hurt();
   player.flash = 1;
   hurt = Math.min(1, hurt + 0.45 + dmg / 25);
   shake = Math.min(0.6, shake + 0.3);
@@ -800,6 +1002,7 @@ function damagePlayer(dmg, point, dir) {
   if (player.hp <= 0) {
     player.alive = false;
     player.mesh.visible = false;
+    SFX.wallRun(false);
     collapse(player, chunkMats.player, dir);
     bloodBurst(player.pos.clone(), dir, 34, 1.2);
     setBulletTime(false);
@@ -822,12 +1025,13 @@ function updateBullets(dt) {
     }
     if (hitBox || hitBody) {
       const point = b.pos.clone().addScaledVector(b.dir, tHit);
-      if (hitBody === player) damagePlayer(CFG.enemyDamage, point, b.dir);
-      else if (hitBody) damageEnemy(hitBody, CFG.playerDamage, point, b.dir);
+      if (hitBody === player) damagePlayer(b.damage, point, b.dir);
+      else if (hitBody) damageEnemy(hitBody, b.damage, point, b.dir);
       else {
         const n = faceNormal(point, hitBox, new V3());
         sparkBurst(point, n);
         addDecal(decalRings.hole, point, n, 0.16);
+        SFX.impact(point);
       }
       bullets.splice(i, 1);
       continue;
@@ -957,6 +1161,7 @@ function updatePlayer(dt, rdt) {
   if (P.jumpBuf > 0 && control) {
     if (P.coyote > 0) {
       P.vel.y = CFG.jumpVel; P.coyote = 0; P.jumpBuf = 0; P.grounded = false;
+      SFX.jump();
     } else if (wall && P.wallJumpLock <= 0 && !(P.lastJumpWall && wall.x * P.lastJumpWall.x + wall.z * P.lastJumpWall.z > 0.5)) {
       // (one wall jump per wall until you touch the ground or another wall, so 'up' jumps can't climb forever)
       const vn = P.vel.x * wall.x + P.vel.z * wall.z;
@@ -971,6 +1176,7 @@ function updatePlayer(dt, rdt) {
       P.vel.y = up;
       P.lastWallJump = a < -0.3 ? 'up' : a > 0.3 ? 'away' : 'neutral';
       P.lastJumpWall = { x: wall.x, z: wall.z };
+      SFX.wallJump();
       P.lastWallNormal = { x: wall.x, z: wall.z };
       P.wallState = 'none'; P.wallJumpLock = 0.18; P.jumpBuf = 0;
     }
@@ -1031,7 +1237,16 @@ function updatePlayer(dt, rdt) {
   }
 
   const res = moveBody(P, dt, CFG.stepUp);
+  const fallSpeed = -P.vel.y;
+  const wasGrounded = P.grounded;
   P.grounded = res.grounded;
+  if (P.grounded && !wasGrounded && P.airTime > 0.25) SFX.land((P.lastFall - 6) / 18);
+  P.airTime = P.grounded ? 0 : (P.airTime || 0) + dt;
+  if (!P.grounded) P.lastFall = Math.max(fallSpeed, P.vel.y < 0 ? -P.vel.y : 0);
+  const hs = Math.hypot(P.vel.x, P.vel.z);
+  if (P.grounded && hs > 2) { P.stepAcc = (P.stepAcc || 0) + hs * dt; if (P.stepAcc > (running ? 2.6 : 2.0)) { P.stepAcc = 0; SFX.step(running); } }
+  SFX.wallRun(P.wallState === 'run' && state === 'playing');
+  if (P.wallState === 'run') { P.trailT = (P.trailT || 0) - dt; if (P.trailT <= 0) { P.trailT = 0.045; addTrail(P.pos); } }
   if (res.ceil && P.wallState === 'climb') { P.wallState = 'none'; P.lastWallNormal = P.wallNormal; }
   if (P.pos.y < -10) { P.pos.set(PLAYER_SPAWN.x, PLAYER_SPAWN.y, PLAYER_SPAWN.z); P.vel.set(0, 0, 0); }
 
@@ -1044,6 +1259,31 @@ function updatePlayer(dt, rdt) {
 
 // ------------------------------------------------------------------ enemies
 const _eye = new V3(), _to = new V3(), _aimPt = new V3();
+// --- steering: look ahead for walls and cover, and pick a free direction instead of walking into them
+const _steerCand = [];
+function blockedAhead(e, dx, dz, look) {
+  const h = e.half, x1 = e.pos.x + dx * look, z1 = e.pos.z + dz * look;
+  const list = query(Math.min(e.pos.x, x1) - 1, Math.min(e.pos.z, z1) - 1, Math.max(e.pos.x, x1) + 1, Math.max(e.pos.z, z1) + 1, _steerCand);
+  for (let k = 1; k <= 3; k++) {
+    if (anyOverlapIn(list, e.pos.x + dx * look * k / 3, e.pos.y + 0.08, e.pos.z + dz * look * k / 3, h.x * 0.95, h.y * 0.85, h.z * 0.95)) return true;
+  }
+  return false;
+}
+const inBounds = (e, x, z) => x > e.bounds[0] && x < e.bounds[1] && z > e.bounds[2] && z < e.bounds[3];
+const STEER_ANGLES = [0, 0.6, -0.6, 1.2, -1.2, 1.8, -1.8, 2.5, -2.5];
+function steer(e, mx, mz, dt) {
+  if (e.unstuckT > 0) { e.unstuckT -= dt; return [e.unstuckX, e.unstuckZ]; }
+  e.steerT -= dt;
+  if (e.steerT <= 0) { e.steerT = 0.7; if (Math.random() < 0.3) e.steerSide *= -1; }
+  for (const a0 of STEER_ANGLES) {
+    const a = a0 * e.steerSide, c = Math.cos(a), sn = Math.sin(a);
+    const dx = mx * c - mz * sn, dz = mx * sn + mz * c;
+    if (!inBounds(e, e.pos.x + dx * 0.35, e.pos.z + dz * 0.35)) continue;   // short look: lets them reach roof edges
+    if (!blockedAhead(e, dx, dz, 1.6)) return [dx, dz];
+  }
+  return [0, 0];
+}
+
 function updateEnemy(e, dt) {
   e.flash = Math.max(0, e.flash - dt * 6);
   if (!e.alive) return;
@@ -1052,14 +1292,14 @@ function updateEnemy(e, dt) {
   const dx = P.pos.x - e.pos.x, dz = P.pos.z - e.pos.z;
   const dist = Math.hypot(dx, dz) || 0.001;
   e.bar.visible = dist < 75;
-  if (dist > 95) return;                               // far away: idle (saves time on a long street)
+  if (dist > 95) { if (e.laser) e.laser.visible = false; return; }   // far away: idle
   const nx = dx / dist, nz = dz / dist, px = -nz, pz = nx;
   let mx = 0, mz = 0, speed = 0;
 
   e.strafeTimer -= dt;
   if (e.strafeTimer <= 0) { e.strafeDir = Math.random() < 0.5 ? -1 : 1; e.strafeTimer = 1.4 + Math.random() * 2.2; }
 
-  // Posted low enough? Every second or two, decide whether to hold the post or jump down to the floor:
+  // Posted low enough (riflemen only)? Every second or two, decide whether to hold the post or jump down:
   //  - jump down to get away when the player has come up to their level and is close;
   //  - jump down to hunt when they have lost sight of a player who is down on the floor;
   //  - otherwise stay up, where the view is better.
@@ -1073,23 +1313,43 @@ function updateEnemy(e, dt) {
       if ((cornered && Math.random() < 0.8) || (hunt && Math.random() < 0.6)) { e.mode = 'dropping'; e.dropT = 0; e.burst = 0; }
     }
   }
+  let steerIt = false;
   if (e.mode === 'dropping') {
-    // step off the edge and fall to the floor below
-    e.dropT += dt;
+    e.dropT += dt;                                    // step off the edge and fall to the floor below
     mx = e.drop.dir[0]; mz = e.drop.dir[1]; speed = 5.5; e.running = true;
   } else if (P.alive) {
-    if (dist < 13) { mx = -nx; mz = -nz; speed = 9; e.running = true; }                         // run away
-    else if (dist < 22) { mx = -nx * 0.5 + px * e.strafeDir; mz = -nz * 0.5 + pz * e.strafeDir; speed = 6; e.running = true; } // back off while strafing
-    else { mx = nx * 0.6 + px * e.strafeDir * 0.8; mz = nz * 0.6 + pz * e.strafeDir * 0.8; speed = 4.5; e.running = false; } // push to the roof edge for a shot
+    if (e.type === 'rusher') {
+      // charge in, weaving a little; circle once close
+      if (dist > 7) { mx = nx + px * e.strafeDir * 0.35; mz = nz + pz * e.strafeDir * 0.35; speed = 10.5; }
+      else if (dist < 5) { mx = px * e.strafeDir - nx * 0.7; mz = pz * e.strafeDir - nz * 0.7; speed = 7; }   // too close: give a little room
+      else { mx = px * e.strafeDir; mz = pz * e.strafeDir; speed = 7; }                                          // circle at shotgun range
+      e.running = true;
+    } else if (e.type === 'sniper') {
+      // hold the post: creep to the edge until it has a line on you, shuffle slowly, freeze while aiming
+      if (!e.los) { mx = nx; mz = nz; speed = 3; } else { mx = px * e.strafeDir; mz = pz * e.strafeDir; speed = 1.5; }
+      if (e.charge > 0) speed = 0;
+      e.running = false;
+    } else {
+      if (dist < 13) { mx = -nx; mz = -nz; speed = 9; e.running = true; }                         // run away
+      else if (dist < 22) { mx = -nx * 0.5 + px * e.strafeDir; mz = -nz * 0.5 + pz * e.strafeDir; speed = 6; e.running = true; } // back off while strafing
+      else { mx = nx * 0.6 + px * e.strafeDir * 0.8; mz = nz * 0.6 + pz * e.strafeDir * 0.8; speed = 4.5; e.running = false; } // push to the edge for a shot
+    }
     const ml = Math.hypot(mx, mz) || 1; mx /= ml; mz /= ml;
-    const b = e.bounds, look = 1.0;
-    if (e.pos.x + mx * look < b[0] || e.pos.x + mx * look > b[1]) mx = 0;
-    if (e.pos.z + mz * look < b[2] || e.pos.z + mz * look > b[3]) mz = 0;
-    if (Math.hypot(mx, mz) < 0.3 && e.running) {
-      for (const sgn of [e.strafeDir, -e.strafeDir]) {
-        const tx = e.pos.x + px * sgn * look, tz = e.pos.z + pz * sgn * look;
-        if (tx > b[0] && tx < b[1] && tz > b[2] && tz < b[3]) { mx = px * sgn; mz = pz * sgn; e.strafeDir = sgn; break; }
+    steerIt = speed > 0;
+  }
+  if (steerIt) {
+    [mx, mz] = steer(e, mx, mz, dt);
+    // stuck check: wanted to move but barely did -> pick a free sideways direction for a moment
+    e.stuckT -= dt;
+    if (e.stuckT <= 0) {
+      const moved = Math.hypot(e.pos.x - e.stuckFrom.x, e.pos.z - e.stuckFrom.z);
+      if (moved < 0.5 && speed > 3) {
+        const side = Math.random() < 0.5 ? 1 : -1;
+        for (const [cx, cz] of [[px * side, pz * side], [-px * side, -pz * side], [-nx, -nz], [nx, nz]]) {
+          if (inBounds(e, e.pos.x + cx * 1.5, e.pos.z + cz * 1.5) && !blockedAhead(e, cx, cz, 1.5)) { e.unstuckX = cx; e.unstuckZ = cz; e.unstuckT = 0.9; break; }
+        }
       }
+      e.stuckT = 0.8; e.stuckFrom.set(e.pos.x, 0, e.pos.z);
     }
   }
   const accel = 30 * dt;
@@ -1098,7 +1358,7 @@ function updateEnemy(e, dt) {
   e.vel.y = Math.max(-CFG.maxFall, e.vel.y - CFG.gravity * dt);
   const res = moveBody(e, dt, CFG.stepUp);
   e.grounded = res.grounded;
-  if (res.hitX || res.hitZ) { e.strafeDir *= -1; e.strafeTimer = 1 + Math.random(); }
+  if (res.hitX || res.hitZ) { e.steerSide *= -1; e.steerT = 0.7; }
   if (e.mode === 'dropping') {
     if ((e.grounded && e.pos.y < e.postY - 1) || e.dropT > 3) {          // landed: hold the floor from now on
       const a = e.drop.area, m = 0.65;
@@ -1111,53 +1371,112 @@ function updateEnemy(e, dt) {
   }
 
   e.mesh.position.copy(e.pos);
-  e.mesh.rotation.set(0, Math.atan2(-dx, -dz), 0);
+  e.flinch = Math.max(0, (e.flinch || 0) - dt * 5);
+  const fl = e.flinch * e.flinch;
+  e.mesh.rotation.set(0, Math.atan2(-dx, -dz), fl * 0.35 * (e.flinchSide || 1));
+  e.mesh.scale.set(e.size * (1 + 0.18 * fl), e.size * (1 - 0.25 * fl), e.size * (1 + 0.18 * fl));
   e.gun.rotation.x = Math.atan2(P.pos.y - e.pos.y, dist);
-  e.bar.position.set(e.pos.x, e.pos.y + 1.0, e.pos.z);
+  e.bar.position.set(e.pos.x, e.pos.y + e.half.y + 0.5, e.pos.z);
   e.bar.quaternion.copy(camera.quaternion);
-  e.fill.scale.x = Math.max(0.001, e.hp / CFG.enemyHP);
+  e.fill.scale.x = Math.max(0.001, e.hp / e.maxHp);
 
-  // Shooting: only inside weapon range and with line of sight
-  if (!P.alive) return;
-  const eye = _eye.set(e.pos.x, e.pos.y + 0.15, e.pos.z);
+  // Shooting: only inside weapon range, with line of sight, and while on the player's screen
+  if (!P.alive) { if (e.laser) e.laser.visible = false; return; }
+  const eye = _eye.set(e.pos.x, e.pos.y + (e.type === 'sniper' ? 0.35 : 0.15 * e.size), e.pos.z);
   const to = _to.copy(P.pos).sub(eye);
   const d3 = to.length();
+  const range = e.type === 'sniper' ? CFG.sniperRange : e.type === 'rusher' ? CFG.rusherRange : CFG.enemyRange;
   e.losTimer -= dt;
   if (e.losTimer <= 0) {
     e.losTimer = 0.2;
-    e.los = d3 < CFG.enemyRange && rayWorld(eye, to.multiplyScalar(1 / d3), d3) >= d3 - 0.6;
+    e.los = d3 < range && rayWorld(eye, to.multiplyScalar(1 / d3), d3) >= d3 - 0.6;
   }
-  // Only enemies that are on screen may shoot. Coming into view, they take a moment to react.
   const onScreen = frustum.containsPoint(e.pos);
-  if (!e.los || !onScreen || e.mode === 'dropping') { e.fireTimer = Math.max(e.fireTimer, 0.35); e.burst = 0; e.seen = false; return; }
-  if (!e.seen) { e.seen = true; e.fireTimer = Math.max(e.fireTimer, CFG.enemyReaction); }
-  e.fireTimer -= dt;
-  if (e.fireTimer <= 0) {
-    if (e.burst <= 0) e.burst = CFG.enemyBurst;
-    e.burst--;
-    e.fireTimer = e.burst > 0 ? CFG.enemyBurstGap : (dist < 13 ? 0.45 : CFG.enemyBurstDelay) + Math.random() * 0.5;
-    const lead = d3 / CFG.enemyBulletSpeed * 0.7;
-    const evasive = P.wallState === 'run' || (!P.grounded && Math.hypot(P.vel.x, P.vel.z) > 9);
-    const spread = (0.3 + d3 * 0.012) * (evasive ? CFG.enemySpreadVsWallRun : 1);
-    const target = _aimPt.copy(P.pos).addScaledVector(P.vel, lead).addScaledVector(randUnit(_p), spread);
-    const dir = target.sub(eye).normalize();
-    spawnBullet('enemy', eye.clone().addScaledVector(dir, 0.8), dir);
+  const evasive = P.wallState === 'run' || (!P.grounded && Math.hypot(P.vel.x, P.vel.z) > 9);
+  if (!e.los || !onScreen || e.mode === 'dropping') {
+    e.fireTimer = Math.max(e.fireTimer, 0.35); e.burst = 0; e.seen = false;
+    if (e.charge > 0) { e.charge = 0; e.fireTimer = Math.max(e.fireTimer, 0.8); }
+    if (e.laser) e.laser.visible = false;
+    return;
   }
+  if (!e.seen) { e.seen = true; e.fireTimer = Math.max(e.fireTimer, e.type === 'rusher' ? 0.4 : CFG.enemyReaction); }
+  e.fireTimer -= dt;
+
+  if (e.type === 'sniper') {
+    // Telegraph: a laser tracks you while the shot charges, then locks for the last moment (dodge it!).
+    if (e.charge <= 0 && e.fireTimer <= 0) { e.charge = CFG.sniperCharge; SFX.sniperCharge(eye, CFG.sniperCharge); }
+    if (e.charge > 0) {
+      e.charge -= dt;
+      if (e.charge > CFG.sniperLock) e.aimLock.copy(P.pos);
+      const dirL = _aimPt.copy(e.aimLock).sub(eye); const lenL = dirL.length(); dirL.multiplyScalar(1 / lenL);
+      const hitT = Math.min(lenL + 30, rayWorld(eye, dirL, lenL + 30));
+      e.laser.visible = true; e.laser.position.copy(eye);
+      e.laser.quaternion.setFromUnitVectors(Z_AXIS, dirL); e.laser.scale.set(1, 1, hitT);
+      if (e.charge <= 0) {
+        e.laser.visible = false;
+        const dir = dirL.clone().addScaledVector(randUnit(_p), 0.012 * (evasive ? CFG.enemySpreadVsWallRun : 1)).normalize();
+        spawnBullet('enemy', eye.clone().addScaledVector(dir, 1.2), dir, { speed: CFG.sniperBulletSpeed, damage: CFG.sniperDamage, range: CFG.sniperRange + 10 });
+        SFX.enemyShot(eye, 'sniper');
+        e.fireTimer = 2.4 + Math.random() * 0.8;
+      }
+    }
+    return;
+  }
+  if (e.fireTimer > 0) return;
+  if (e.type === 'rusher') {
+    // close-range spread: several pellets at once
+    const aim = _aimPt.copy(P.pos).addScaledVector(P.vel, d3 / CFG.enemyBulletSpeed * 0.5).sub(eye).normalize();
+    for (let k = 0; k < CFG.rusherPellets; k++) {
+      const dir = aim.clone().addScaledVector(randUnit(_p), 0.1 * (evasive ? 1.6 : 1)).normalize();
+      spawnBullet('enemy', eye.clone().addScaledVector(dir, 0.6), dir, { damage: CFG.rusherPelletDamage, range: CFG.rusherRange + 6 });
+    }
+    SFX.enemyShot(eye, 'rusher');
+    e.fireTimer = 1.3 + Math.random() * 0.4;
+    return;
+  }
+  if (e.burst <= 0) e.burst = CFG.enemyBurst;
+  e.burst--;
+  e.fireTimer = e.burst > 0 ? CFG.enemyBurstGap : (dist < 13 ? 0.45 : CFG.enemyBurstDelay) + Math.random() * 0.5;
+  const lead = d3 / CFG.enemyBulletSpeed * 0.7;
+  const spread = (0.3 + d3 * 0.012) * (evasive ? CFG.enemySpreadVsWallRun : 1);
+  const target = _aimPt.copy(P.pos).addScaledVector(P.vel, lead).addScaledVector(randUnit(_p), spread);
+  const dir = target.sub(eye).normalize();
+  spawnBullet('enemy', eye.clone().addScaledVector(dir, 0.8), dir);
+  SFX.enemyShot(eye, 'rifle');
 }
 
 // ------------------------------------------------------------------ camera
 const frustum = new THREE.Frustum(), _pv = new THREE.Matrix4();
 const _pivot = new V3(), _desired = new V3(), _camDir = new V3(), _camPos = new V3(), _look = new V3(), _cr = new V3();
+// Third-person camera. In tight spaces it keeps to the open side: while wall running the shoulder moves
+// away from the wall, and near a single wall it swaps to the other shoulder. Collisions pull it in
+// instantly but it eases back out, so it doesn't pump in narrow corridors. When it ends up very close,
+// the player cube turns see-through so it never blocks the view.
+let camShoulder = 0.95, camDist = 5.5, camSide = 1;
+const _neg = new V3();
 function updateCamera(rdt) {
   const L = lookDir(_L), r = rightDir(_cr);
   camPivotY += (player.pos.y - camPivotY) * (1 - Math.exp(-14 * rdt));
   const pivot = _pivot.set(player.pos.x, camPivotY + 0.85, player.pos.z);
-  const desired = _desired.copy(pivot).addScaledVector(L, -5.5).addScaledVector(r, 0.95);
+  const right = rayWorld(pivot, r, 2.2), left = rayWorld(pivot, _neg.copy(r).negate(), 2.2);
+  if (player.wallState === 'run' && player.wallNormal) {
+    camSide = (player.wallNormal.x * r.x + player.wallNormal.z * r.z) >= 0 ? 1 : -1;   // away from the wall
+  } else if (right < 1.5 && left > right + 0.4) camSide = -1;
+  else if (left < 1.5 && right > left + 0.4) camSide = 1;
+  else if (right > 2.1 && left > 2.1) camSide = 1;                                      // open space: default right shoulder
+  const tight = Math.min(left, right) < 2.2 || player.wallState !== 'none';
+  const shoulderTarget = camSide * (tight ? 0.7 : 0.95);
+  camShoulder += (shoulderTarget - camShoulder) * (1 - Math.exp(-9 * rdt));
+  const distTarget = player.wallState === 'run' ? 4.6 : tight ? 5 : 5.5;
+  const desired = _desired.copy(pivot).addScaledVector(L, -distTarget).addScaledVector(r, camShoulder);
   desired.y += 0.35;
   _camDir.copy(desired).sub(pivot);
   const len = _camDir.length(); _camDir.multiplyScalar(1 / len);
   const t = rayWorld(pivot, _camDir, len + 0.3);
-  const camPos = t < len + 0.3 ? _camPos.copy(pivot).addScaledVector(_camDir, Math.max(0.25, t - 0.3)) : _camPos.copy(desired);
+  const allowed = t < len + 0.3 ? Math.max(0.25, t - 0.3) : len;
+  if (allowed < camDist) camDist = allowed;                                             // snap in: never clip
+  else camDist += (allowed - camDist) * (1 - Math.exp(-5 * rdt));                       // ease back out
+  const camPos = _camPos.copy(pivot).addScaledVector(_camDir, camDist);
   if (shake > 0 && !REDUCED_MOTION) camPos.addScaledVector(randUnit(_look), shake * 0.35);
   camera.position.copy(camPos);
   camera.lookAt(_look.copy(camPos).add(L));
@@ -1166,7 +1485,9 @@ function updateCamera(rdt) {
   camera.rotateZ(camRoll);
   camera.updateMatrixWorld();
   frustum.setFromProjectionMatrix(_pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
-  const fovTarget = bulletTime ? 62 : 72;
+  const near = camPos.distanceTo(player.pos);
+  player.mat.opacity = Math.min(1, Math.max(0.25, (near - 0.9) / 1.3));
+  const fovTarget = (bulletTime ? 62 : 72) + (player.wallState === 'run' ? 4 : 0);
   if (Math.abs(camera.fov - fovTarget) > 0.05) { camera.fov += (fovTarget - camera.fov) * (1 - Math.exp(-6 * rdt)); camera.updateProjectionMatrix(); }
 }
 
@@ -1250,6 +1571,7 @@ function setState(s) {
 
 function setBulletTime(on) {
   if (on && (focus < 8 || !player.alive || state !== 'playing')) return;
+  if (on !== bulletTime) SFX.slow(on);
   bulletTime = on;
   document.body.classList.toggle('slowmo', on);
 }
@@ -1260,7 +1582,9 @@ addEventListener('keydown', (e) => {
   if (BLOCK_KEYS.has(e.code)) e.preventDefault();
   keys[e.code] = true;
   if (e.repeat) return;
+  SFX.init();
   if (e.code === 'Space') jumpQueued = true;
+  if (e.code === 'KeyM') { const m = SFX.toggle(); $('soundState').textContent = m ? 'Sound off' : 'Sound on'; }
   if (e.code === 'KeyE' && state === 'playing') setBulletTime(!bulletTime);
   if (e.code === 'KeyR' && state !== 'start') { restart(); lockPointer(); }   // restart at any moment
 });
@@ -1300,6 +1624,7 @@ document.addEventListener('pointerlockchange', () => {
   else if (state === 'playing' && !fallbackAim) { firing = false; setState('paused'); }
 });
 $('overlay').addEventListener('click', () => {
+  SFX.init();
   if (state === 'start') { restart(); lockPointer(); }
   else if (state === 'paused') { setState('playing'); lockPointer(); }
 });
@@ -1320,7 +1645,8 @@ function simulate(rdt) {
     focusDelay -= rdt;
     if (focusDelay <= 0) focus = Math.min(CFG.focusMax, focus + CFG.focusRegen * rdt);
   }
-  const dt = rdt * timeScale;
+  hitStop -= rdt;
+  const dt = rdt * timeScale * (hitStop > 0 ? 0.08 : 1);
 
   if (fallbackAim && state === 'playing') {
     if (keys.ArrowLeft) yaw += 2.4 * rdt;
@@ -1338,6 +1664,8 @@ function simulate(rdt) {
 
   if (winTimer > 0) { winTimer -= rdt; if (winTimer <= 0 && state === 'playing') { setBulletTime(false); setState('won'); } }
   hurt = Math.max(0, hurt - rdt * 1.4);
+  updateTrails(rdt);
+  if (player.alive && player.hp <= 30 && state === 'playing') { heartT -= rdt; if (heartT <= 0) { heartT = 0.85; SFX.heartbeat(); } } else heartT = 0;
   shake = Math.max(0, shake - rdt * 1.8);
   hitmarkT -= rdt;
   if (muzzle.visible) { muzzle.userData.t -= rdt; if (muzzle.userData.t <= 0) muzzle.visible = false; }
@@ -1351,6 +1679,7 @@ function frame(now) {
   updateCamera(rdt);
   updateAim();
   updateSun(player.pos);
+  updateSky(player.pos.z);
   updateHUD();
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
@@ -1390,8 +1719,8 @@ window.__game = {
   setFiring(v) { firing = v; },
   bulletTime: setBulletTime, get timeScale() { return timeScale; }, get focus() { return focus; }, set focus(v) { focus = v; },
   noLock() { fallbackAim = true; },
-  camPos: () => camera.position.clone(),
-  render() { updateCamera(1 / 60); updateAim(); updateSun(player.pos); updateHUD(); renderer.render(scene, camera); },
+  camPos: () => camera.position.clone(), frustumHas: (p) => frustum.containsPoint(p), inSolid: (p) => !!pointBox(p), get camShoulder() { return camShoulder; },
+  render() { updateCamera(1 / 60); updateAim(); updateSun(player.pos); updateSky(player.pos.z); updateHUD(); renderer.render(scene, camera); },
 };
 })();
 </script>
