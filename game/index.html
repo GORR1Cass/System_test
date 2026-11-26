@@ -137,7 +137,7 @@ const CFG = {
   enemyBulletSpeed: 42, enemyDamage: 12, enemyRange: 50, enemyBulletRange: 60,
   enemyBurst: 3, enemyBurstGap: 0.13, enemyBurstDelay: 1.3,   // 3-round bursts, ~1.3-1.8 s apart
   killHeal: 20, killFocus: 35,                // push-forward combat: kills refill health and bullet time
-  wallRunBoost: 1.2,                           // wall running is faster than running (max speed multiplier)
+  wallRunDecay: 3,                             // m/s lost per second on the wall: a wall run never speeds you up
   enemySpreadVsWallRun: 2.4,                   // enemies struggle to hit a wall-running / fast airborne player
   enemyReaction: 0.6,                          // seconds an enemy waits after coming on screen before firing
   bulletTimeScale: 0.25, focusMax: 100, focusDrain: 24, focusRegen: 12, focusRegenDelay: 1.0,
@@ -224,7 +224,7 @@ function buildLevel() {
   L.P2 = addBox(-8, 0, -119, -4, 14, -111, 'route');
   L.wr3 = addBox(-9.5, 0, -126, -8, 20, -119, 'route');
   L.D = addBox(-10, 0, -150, 10, 12, -128, 'building', 3);
-  L.shaft1 = addBox(-10, 0, -125, -3, 10, -124.5, 'route');      // 3 m shaft in front of D
+  L.shaft1 = addBox(-10, 0, -125, -3, 13.5, -124.5, 'route');      // 3 m shaft in front of D
   [[-4, -90, 3, 3, 6], [9, -104, 3, 3, 6], [3, -116, 3, 3, 5]].forEach(([x, z, w, d, h]) => block(x, z, w, d, h, 0, 'cover'));
   [[4, -86, 6, 1, 1.3], [12, -112, 1, 6, 1.3], [7, -123, 5, 1, 1.3], [-1, -102, 1, 5, 1.3]].forEach(([x, z, w, d, h]) => block(x, z, w, d, h, 0, 'cover'));
   hint(-10, -128, 0, -118, -1, 'Climb the shaft between the <b>orange wall</b> and the building.', 9);
@@ -945,8 +945,8 @@ function updatePlayer(dt, rdt) {
     } else if (wall && P.wallJumpLock <= 0) {
       const vn = P.vel.x * wall.x + P.vel.z * wall.z;
       const ax = P.vel.x - wall.x * vn, az = P.vel.z - wall.z * vn;   // keep speed along the wall
-      P.vel.x = ax + wall.x * CFG.wallJumpOut + wish.x * 2;     // keep all the speed built along the wall
-      P.vel.z = az + wall.z * CFG.wallJumpOut + wish.z * 2;
+      P.vel.x = ax + wall.x * CFG.wallJumpOut;     // keep the speed along the wall, push away from it; no extra speed
+      P.vel.z = az + wall.z * CFG.wallJumpOut;
       P.vel.y = CFG.wallJumpUp;
       P.lastWallNormal = { x: wall.x, z: wall.z };
       P.wallState = 'none'; P.wallJumpLock = 0.18; P.jumpBuf = 0;
@@ -986,7 +986,8 @@ function updatePlayer(dt, rdt) {
     const wx = wish.x - n.x * wn, wz = wish.z - n.z * wn;
     if (wx * tx + wz * tz < 0) { tx = -tx; tz = -tz; }
     const len = Math.hypot(tx, tz) || 1;
-    const s = Math.min(CFG.runSpeed * CFG.wallRunBoost, Math.max(CFG.runSpeed, len * 1.02));   // wall running builds speed
+    const s = Math.max(0, len - CFG.wallRunDecay * dt);   // keep the speed you arrived with, bleeding a little every frame
+    if (s < CFG.wallRunMinSpeed) { P.lastWallNormal = n; P.wallState = 'none'; }   // too slow: slide off the wall
     P.vel.x = tx / len * s - n.x * 1.5;
     P.vel.z = tz / len * s - n.z * 1.5;
     P.vel.y -= CFG.wallRunGravity * dt;

@@ -21,7 +21,7 @@ Third-person parkour shooter prototype in plain HTML + JavaScript (Three.js from
 
 - **Mouse** aim · **Left click** shoot · **WASD** move · **Shift** run · **Space** jump / wall jump
 - **Right click** or **E** bullet time (slows player, enemies and bullets; drains the meter)
-- Run and jump along a wall to **wall run** (faster than running), jump into a wall to **wall climb**, jump again to **wall jump**
+- Run and jump along a wall to **wall run** (you keep the speed you arrive with and slowly lose it; too slow and you slide off), jump into a wall to **wall climb**, jump again to **wall jump**
 - **R** restarts at any time
 
 ### Level design
